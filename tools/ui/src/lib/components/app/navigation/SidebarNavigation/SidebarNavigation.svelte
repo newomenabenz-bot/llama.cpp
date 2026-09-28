@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { PanelLeftClose, PanelLeftOpen, X } from '@lucide/svelte';
+	import { FolderGit2, PanelLeftClose, PanelLeftOpen, X } from '@lucide/svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import {
@@ -10,6 +10,8 @@
 		SidebarNavigationActions,
 		SidebarNavigationConversationList
 	} from '$lib/components/app';
+	import { Button } from '$lib/components/ui/button';
+	import { workspaceStore } from '$lib/workbench/workspace/workspace.svelte';
 	import { ROUTES } from '$lib/constants';
 	import { TooltipSide } from '$lib/enums';
 	import { useKeyboardShortcuts } from '$lib/hooks/use-keyboard-shortcuts.svelte';
@@ -404,6 +406,31 @@
 				}}
 				onSettingsClick={() => (settingsDialogOpen = true)}
 			/>
+
+			<!-- Workbench Workspace Explorer Action -->
+			<div class="px-2">
+				{#if innerWidth > 768 ? uiStore.isSidebarExpanded : true}
+					<Button
+						variant="ghost"
+						size="default"
+						class="w-full min-w-9 justify-start px-2 gap-2 text-xs font-normal hover:bg-accent text-foreground/80 hover:text-foreground"
+						onclick={() => workspaceStore.toggleExplorer()}
+					>
+						<FolderGit2 class="size-4 text-amber-500/90 shrink-0" />
+						<span class="truncate">Workspace</span>
+					</Button>
+				{:else}
+					<ActionIcon
+						icon={FolderGit2}
+						size="lg"
+						iconSize="size-4 text-amber-500/90"
+						tooltip="Workspace Explorer"
+						tooltipSide={TooltipSide.RIGHT}
+						onclick={() => workspaceStore.toggleExplorer()}
+						class="h-9 w-9 rounded-full hover:bg-accent!"
+					/>
+				{/if}
+			</div>
 
 			{#if uiStore.isSidebarExpanded || isOnMobile}
 				<div class="flex min-h-0 flex-1 flex-col overflow-y-auto">

@@ -6,7 +6,10 @@
 	import { page } from '$app/state';
 	import { SidebarNavigation } from '$lib/components/app';
 	import { PwaMetaTags, PwaRefreshAlert } from '$lib/components/pwa';
+	import * as Sheet from '$lib/components/ui/sheet';
 	import * as Tooltip from '$lib/components/ui/tooltip';
+	import WorkspaceExplorer from '$lib/workbench/components/WorkspaceExplorer.svelte';
+	import { workspaceStore } from '$lib/workbench/workspace/workspace.svelte';
 	import {
 		FAVICON_PATHS,
 		FAVICON_SELECTORS,
@@ -337,6 +340,13 @@
 
 	<Toaster closeButton richColors />
 </Tooltip.Provider>
+
+<!-- Workbench Workspace Explorer Drawer -->
+<Sheet.Root bind:open={workspaceStore.isExplorerOpen}>
+	<Sheet.Content side="right" class="w-full sm:max-w-2xl p-0 gap-0 overflow-hidden">
+		<WorkspaceExplorer onClose={() => workspaceStore.closeExplorer()} />
+	</Sheet.Content>
+</Sheet.Root>
 
 <!-- PWA update prompt + version -->
 <div class="fixed right-4 bottom-4 z-9999 flex flex-col items-end gap-1">

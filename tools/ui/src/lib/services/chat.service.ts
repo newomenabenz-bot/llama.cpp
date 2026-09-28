@@ -46,6 +46,11 @@ import { ApiError } from '$lib/utils/api-fetch';
 import { getAuthHeaders, getJsonHeaders } from '$lib/utils/api-headers';
 import { formatAttachmentText } from '$lib/utils/formatters';
 import { streamIdentity } from '$lib/utils/stream-identity';
+import { ProviderService } from '$lib/workbench/providers/provider.service';
+import {
+	WorkbenchContextBudgetService,
+	DEFAULT_CONTEXT_BUDGET_CONFIG
+} from '$lib/workbench/context';
 
 interface ResumableStreamState {
 	bytesReceived: number;
@@ -1019,7 +1024,7 @@ export class ChatService {
 	 * @returns {Promise<string | void>} that resolves to the complete response string (non-streaming) or void (streaming)
 	 * @throws {Error} if the request fails or is aborted
 	 */
-	static async sendMessage(
+	static async sendLlamaServerMessage(
 		messages: ApiChatMessageData[] | (DatabaseMessage & { extra?: DatabaseMessageExtra[] })[],
 		options: SettingsChatServiceOptions = {},
 		conversationId?: string,
@@ -1074,9 +1079,18 @@ export class ChatService {
 		const normalizedMessages: ApiChatMessageData[] =
 			await ChatService.normalizeMessagesForApi(messages);
 
+		// Apply Workbench Context Budgeting & historical tool output compaction
+		const modelCtxSize =
+			(options.model ? modelsStore.props.getModelContextSize(options.model) : null) ??
+			DEFAULT_CONTEXT_BUDGET_CONFIG.maxTokens;
+		const budgetedMessages = WorkbenchContextBudgetService.prepareMessagesForDispatch(
+			normalizedMessages,
+			{ maxTokens: modelCtxSize }
+		);
+
 		// Filter out image attachments if the model doesn't support vision
 		if (options.model && !modelsStore.props.modelSupportsVision(options.model)) {
-			normalizedMessages.forEach((msg) => {
+			budgetedMessages.forEach((msg) => {
 				if (Array.isArray(msg.content)) {
 					msg.content = msg.content.filter((part: ApiChatMessageContentPart) => {
 						if (part.type === ContentPartType.IMAGE_URL) {
@@ -1103,7 +1117,7 @@ export class ChatService {
 		}
 
 		const requestBody: ApiChatCompletionRequest = {
-			messages: normalizedMessages.map((msg: ApiChatMessageData) => {
+			messages: budgetedMessages.map((msg: ApiChatMessageData) => {
 				const mapped: ApiChatCompletionRequest['messages'][0] = {
 					content: msg.content,
 					role: msg.role,
@@ -1316,6 +1330,31 @@ export class ChatService {
 
 			throw userFriendlyError;
 		}
+	}
+
+	/**
+	 * Public entry point for chat completion requests.
+	 * Delegates to the active model provider via ProviderService.
+	 *
+	 * @param messages - Array of chat messages (ApiChatMessageData or DatabaseMessage with attachments)
+	 * @param options - Generation options, sampling hyperparameters, and streaming callbacks
+	 * @param conversationId - Optional conversation ID for session/stream tracking
+	 * @param signal - Optional AbortSignal for user cancellation
+	 * @returns {Promise<string | void>} that resolves to the complete response string (non-streaming) or void (streaming)
+	 * @throws {Error} if the request fails or is aborted
+	 */
+	static async sendMessage(
+		messages: ApiChatMessageData[] | (DatabaseMessage & { extra?: DatabaseMessageExtra[] })[],
+		options: SettingsChatServiceOptions = {},
+		conversationId?: string,
+		signal?: AbortSignal
+	): Promise<string | void> {
+		return ProviderService.getActiveProvider().sendMessage(
+			messages,
+			options,
+			conversationId,
+			signal
+		);
 	}
 
 	/**

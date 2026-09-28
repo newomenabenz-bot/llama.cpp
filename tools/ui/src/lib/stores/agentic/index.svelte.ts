@@ -32,6 +32,9 @@ import { ChatService } from '$lib/services';
 import { ReadMediaService } from '$lib/services/read-media.service';
 import { SandboxService } from '$lib/services/sandbox.service';
 import { ToolsService } from '$lib/services/tools.service';
+import { WorkbenchSecurityBridge } from '$lib/workbench/security';
+import { WorkbenchAgentCheckpointService } from '$lib/workbench/persistence';
+import { WorkbenchSettingsService } from '$lib/workbench/settings/workbench-settings.service';
 // direct imports between stores, not via the barrel, to avoid circular deps
 import { AgenticGates } from '$lib/stores/agentic/gates.svelte';
 import { conversationsStore } from '$lib/stores/conversations/index.svelte';
@@ -384,6 +387,7 @@ class AgenticStore {
 		} catch (error) {
 			const normalizedError = error instanceof Error ? error : new Error(String(error));
 
+			WorkbenchAgentCheckpointService.recordError(conversationId);
 			this.updateSession(conversationId, { lastError: normalizedError });
 			callbacks.onError?.(normalizedError);
 
@@ -518,6 +522,16 @@ class AgenticStore {
 				turn: turn + 1
 			};
 
+			const currNodeId = conversationsStore.activeConversation?.currNode ?? '';
+			const executionMode = WorkbenchSettingsService.getExecutionMode();
+			WorkbenchAgentCheckpointService.recordThinking({
+				conversationId,
+				currNodeId,
+				turn: turn + 1,
+				maxTurns,
+				executionMode
+			});
+
 			try {
 				await ChatService.sendMessage(
 					sessionMessages as ApiChatMessageData[],
@@ -604,6 +618,7 @@ class AgenticStore {
 				}
 			} catch (error) {
 				if (signal?.aborted) {
+					WorkbenchAgentCheckpointService.recordHalted(conversationId);
 					// Save whatever we have for this turn before exiting
 					await onAssistantTurnComplete?.(
 						turnContent,
@@ -616,6 +631,7 @@ class AgenticStore {
 					return;
 				}
 
+				WorkbenchAgentCheckpointService.recordError(conversationId);
 				const normalizedError = error instanceof Error ? error : new Error('LLM stream error');
 
 				// preserve partial output as is, the outer error dialog informs the user separately
@@ -635,6 +651,7 @@ class AgenticStore {
 			// and returns normally. Bail out here so a half-received tool_call (truncated
 			// arguments JSON) is not persisted as if it were complete.
 			if (signal?.aborted) {
+				WorkbenchAgentCheckpointService.recordHalted(conversationId);
 				await onAssistantTurnComplete?.(
 					turnContent,
 					turnReasoningContent || undefined,
@@ -649,6 +666,7 @@ class AgenticStore {
 			// === Steering check: if a user message was queued during this turn, exit the flow.
 			// The caller (chatStore) will consume the pending message and re-send it normally.
 			if (this.gates.hasPendingSteeringMessage(conversationId)) {
+				WorkbenchAgentCheckpointService.recordHalted(conversationId);
 				console.log('[AgenticStore] Steering message detected after turn, exiting agentic flow');
 				await onAssistantTurnComplete?.(
 					turnContent,
@@ -663,6 +681,7 @@ class AgenticStore {
 
 			// No tool calls = final turn, save and complete
 			if (turnToolCalls.length === 0) {
+				WorkbenchAgentCheckpointService.clearCheckpoint(conversationId);
 				agenticTimings.perTurn!.push(turnStats);
 
 				const finalTimings = this.buildFinalTimings(capturedTimings, agenticTimings);
@@ -685,6 +704,7 @@ class AgenticStore {
 			const normalizedCalls = this.normalizeToolCalls(turnToolCalls);
 
 			if (normalizedCalls.length === 0) {
+				WorkbenchAgentCheckpointService.clearCheckpoint(conversationId);
 				await onAssistantTurnComplete?.(
 					turnContent,
 					turnReasoningContent || undefined,
@@ -698,6 +718,20 @@ class AgenticStore {
 
 			totalToolCallCount += normalizedCalls.length;
 			this.updateSession(conversationId, { totalToolCalls: totalToolCallCount });
+
+			const pendingForCheckpoint = normalizedCalls.map((c) => ({
+				args: this.parseToolArguments(c.function.arguments),
+				id: c.id,
+				name: c.function.name
+			}));
+			WorkbenchAgentCheckpointService.recordExecutingTools({
+				conversationId,
+				currNodeId,
+				executionMode,
+				maxTurns,
+				pendingToolCalls: pendingForCheckpoint,
+				turn: turn + 1
+			});
 
 			// Save the assistant message with its tool calls
 			await onAssistantTurnComplete?.(
@@ -720,6 +754,7 @@ class AgenticStore {
 				const toolCall = normalizedCalls[i];
 
 				if (signal?.aborted) {
+					WorkbenchAgentCheckpointService.recordHalted(conversationId);
 					onFlowComplete?.(this.buildFinalTimings(capturedTimings, agenticTimings));
 
 					return;
@@ -727,6 +762,7 @@ class AgenticStore {
 
 				// Check for pending steering message - skip remaining tool calls
 				if (this.gates.hasPendingSteeringMessage(conversationId)) {
+					WorkbenchAgentCheckpointService.recordHalted(conversationId);
 					console.log(
 						`[AgenticStore] Steering message detected, skipping ${normalizedCalls.length - i} remaining tool call(s)`
 					);
@@ -750,18 +786,49 @@ class AgenticStore {
 
 				const toolName = toolCall.function.name;
 				const serverLabel = toolsStore.getToolServerLabel(toolName);
-				// Ask for permission before executing the tool
-				const permission = await this.gates.requestPermission(
-					conversationId,
+				const parsedArgs = this.parseToolArguments(toolCall.function.arguments);
+				const cwd = conversationsStore.activeConversation?.cwd;
+
+				// Pre-evaluate tool execution through Workbench Security Policy Bridge
+				const securityEval = WorkbenchSecurityBridge.evaluateToolCall(
 					toolName,
-					serverLabel,
-					signal
+					parsedArgs,
+					conversationId,
+					turnStats.turn,
+					cwd
 				);
+
+				let permission: ToolPermissionDecision;
+
+				if (securityEval.action === 'DENY') {
+					// Hard-denied by policy sandbox or command guard: bypass interactive gate
+					permission = ToolPermissionDecision.DENY;
+				} else if (securityEval.action === 'ALLOW') {
+					// Pre-approved by execution mode policy (e.g. read-only, in-workspace autonomous)
+					permission = ToolPermissionDecision.ONCE;
+				} else {
+					WorkbenchAgentCheckpointService.recordAwaitingPermission(conversationId);
+					// PROMPT: Request interactive permission via upstream gate
+					permission = await this.gates.requestPermission(
+						conversationId,
+						toolName,
+						serverLabel,
+						signal
+					);
+
+					if (permission !== ToolPermissionDecision.DENY) {
+						WorkbenchSecurityBridge.recordSessionApproval(conversationId, toolName);
+					} else {
+						WorkbenchSecurityBridge.recordUserDenial(securityEval.receiptId);
+					}
+				}
 
 				// Yield to allow Svelte to flush the UI update (hide permission dialog)
 				await new Promise((r) => setTimeout(r, 0));
 
 				if (signal?.aborted) {
+					WorkbenchAgentCheckpointService.recordHalted(conversationId);
+					WorkbenchSecurityBridge.recordUserDenial(securityEval.receiptId);
 					onFlowComplete?.(this.buildFinalTimings(capturedTimings, agenticTimings));
 
 					return;
@@ -780,7 +847,7 @@ class AgenticStore {
 				this.updateSession(conversationId, { executingToolCallId: toolCall.id });
 
 				if (permission === ToolPermissionDecision.DENY) {
-					result = 'Tool execution was denied by the user.';
+					result = securityEval.syntheticRejection ?? 'Tool execution was denied by the user.';
 					toolSuccess = false;
 				} else {
 					try {
@@ -790,8 +857,7 @@ class AgenticStore {
 							createToolResultMessage &&
 							updateToolResultMessage
 						) {
-							const args = this.parseToolArguments(toolCall.function.arguments);
-							const cwd = conversationsStore.activeConversation?.cwd;
+							const args = parsedArgs;
 							const msg = await createToolResultMessage(toolCall.id, '', undefined, cwd);
 
 							createdToolResultMessageId = msg.id;
@@ -818,15 +884,14 @@ class AgenticStore {
 							}
 							result = accumulated;
 						} else if (toolSource === ToolSource.SERVER) {
-							const args = this.parseToolArguments(toolCall.function.arguments);
-							const cwd = conversationsStore.activeConversation?.cwd;
+							const args = parsedArgs;
 							const executionResult = await ToolsService.executeTool(toolName, args, signal, cwd);
 
 							result = executionResult.content;
 
 							if (executionResult.isError) toolSuccess = false;
 						} else if (toolSource === ToolSource.BROWSER) {
-							const args = this.parseToolArguments(toolCall.function.arguments);
+							const args = parsedArgs;
 
 							let executionResult: ToolExecutionResult;
 
@@ -862,6 +927,12 @@ class AgenticStore {
 						}
 					} catch (error) {
 						if (isAbortError(error)) {
+							WorkbenchAgentCheckpointService.recordHalted(conversationId);
+							WorkbenchSecurityBridge.recordExecutionOutcome(
+								securityEval.receiptId,
+								false,
+								Math.round(performance.now() - toolStartTime)
+							);
 							this.updateSession(conversationId, { executingToolCallId: null });
 							onFlowComplete?.(this.buildFinalTimings(capturedTimings, agenticTimings));
 
@@ -883,7 +954,23 @@ class AgenticStore {
 
 				this.updateSession(conversationId, { executingToolCallId: null });
 
+				WorkbenchAgentCheckpointService.recordToolCompletion({
+					conversationId,
+					result,
+					toolCallId: toolCall.id,
+					toolName
+				});
+
 				const toolDurationMs = performance.now() - toolStartTime;
+
+				if (permission !== ToolPermissionDecision.DENY) {
+					WorkbenchSecurityBridge.recordExecutionOutcome(
+						securityEval.receiptId,
+						toolSuccess,
+						Math.round(toolDurationMs)
+					);
+				}
+
 				const toolTiming: ChatMessageToolCallTiming = {
 					duration_ms: Math.round(toolDurationMs),
 					name: toolCall.function.name,
@@ -897,6 +984,7 @@ class AgenticStore {
 				turnStats.toolsMs += Math.round(toolDurationMs);
 
 				if (signal?.aborted) {
+					WorkbenchAgentCheckpointService.recordHalted(conversationId);
 					onFlowComplete?.(this.buildFinalTimings(capturedTimings, agenticTimings));
 
 					return;
@@ -981,6 +1069,7 @@ class AgenticStore {
 
 			// If tools were interrupted by a steering message, exit now instead of starting another LLM turn
 			if (this.gates.hasPendingSteeringMessage(conversationId)) {
+				WorkbenchAgentCheckpointService.recordHalted(conversationId);
 				console.log(
 					'[AgenticStore] Steering message detected after tool execution, exiting agentic flow'
 				);
@@ -1062,16 +1151,20 @@ class AgenticStore {
 	}
 
 	private parseToolArguments(args: string | Record<string, unknown>): Record<string, unknown> {
-		if (typeof args === 'object') return args;
+		if (typeof args === 'object' && args !== null) return args;
 
-		const trimmed = args.trim();
+		const trimmed = typeof args === 'string' ? args.trim() : '';
 
 		if (trimmed === '') return {};
 
-		return JSON.parse(trimmed) as Record<string, unknown>;
+		try {
+			return JSON.parse(trimmed) as Record<string, unknown>;
+		} catch {
+			return {};
+		}
 	}
 
-	private updateSession(conversationId: string, update: Partial<AgenticSession>): void {
+	updateSession(conversationId: string, update: Partial<AgenticSession>): void {
 		const session = this.getSession(conversationId);
 
 		this.sessions.set(conversationId, { ...session, ...update });

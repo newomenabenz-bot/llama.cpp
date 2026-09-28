@@ -25,10 +25,15 @@
 		serverStore,
 		settingsStore
 	} from '$lib/stores';
+	import WorkbenchLayout from '$lib/workbench/components/WorkbenchLayout.svelte';
+	import WorkbenchModeToggle from '$lib/workbench/components/WorkbenchModeToggle.svelte';
+	import { workbenchShellStore } from '$lib/workbench/shell/shell.svelte';
 	import { parseFilesToMessageExtras } from '$lib/utils/browser-only';
 	import { onDestroy, onMount, tick } from 'svelte';
 
 	let { showCenteredEmpty = false } = $props();
+
+	let isWorkbenchMode = $derived(workbenchShellStore.mode === 'workbench');
 
 	let disableAutoScroll = $derived(
 		Boolean(settingsStore.config.disableAutoScroll) || deviceStore.isMobile
@@ -290,9 +295,7 @@
 	}}
 />
 
-{#if isServerLoading}
-	<ServerLoadingSplash />
-{:else}
+{#snippet chatStage()}
 	<div
 		style:--chat-form-bottom-position={chatFormBottomPosition}
 		class="chat-screen flex grow flex-col min-h-[calc(100dvh-1rem)] md:min-h-[calc(100dvh-1rem-var(--chat-tabs-offset,0px))] px-4 md:py-0 pt-12 pb-48 md:pb-4"
@@ -365,6 +368,26 @@
 			/>
 		</div>
 	</div>
+{/snippet}
+
+{#if isServerLoading}
+	<ServerLoadingSplash />
+{:else}
+	{#if !isWorkbenchMode}
+		<div class="fixed md:absolute top-2.5 right-4 z-30 flex items-center gap-2">
+			<WorkbenchModeToggle />
+		</div>
+	{/if}
+
+	{#if isWorkbenchMode}
+		<WorkbenchLayout>
+			{#snippet chat()}
+				{@render chatStage()}
+			{/snippet}
+		</WorkbenchLayout>
+	{:else}
+		{@render chatStage()}
+	{/if}
 {/if}
 
 <ChatScreenDialogsAndAlerts

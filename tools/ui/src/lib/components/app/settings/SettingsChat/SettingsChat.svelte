@@ -9,6 +9,7 @@
 		SettingsFooter
 	} from '$lib/components/app/settings';
 	import { Button } from '$lib/components/ui/button';
+	import { ProviderSettings } from '$lib/workbench/components';
 	import {
 		NUMERIC_FIELDS,
 		POSITIVE_INTEGER_FIELDS,
@@ -153,6 +154,10 @@
 						<SettingsChatImportExportTab />
 					{:else if currentSection.fields}
 						<div class="space-y-6">
+							{#if currentSection.slug === SETTINGS_SECTION_SLUGS.GENERAL}
+								<ProviderSettings />
+							{/if}
+
 							<SettingsChatFields
 								fields={currentSection.fields}
 								{localConfig}

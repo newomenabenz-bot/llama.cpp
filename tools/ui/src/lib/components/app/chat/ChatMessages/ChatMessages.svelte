@@ -1,6 +1,7 @@
 <script lang="ts">
 	import LazyChatMessage from './LazyChatMessage.svelte';
 	import { ChatMessageUserPending } from '$lib/components/app';
+	import SessionRecoveryBanner from '$lib/workbench/components/SessionRecoveryBanner.svelte';
 	import { MessageRole } from '$lib/enums';
 	import { agenticStore, chatStore, conversationsStore, settingsStore } from '$lib/stores';
 	import type { ChatMessageActions } from '$lib/types';
@@ -241,6 +242,8 @@
      navigation into a chat route. -->
 {#key conversationsStore.activeConversation?.id ?? 'new'}
 	<div class="chat-messages">
+		<SessionRecoveryBanner class="mx-auto mt-4 w-full max-w-3xl" />
+
 		{#each displayMessages as { isLastAssistantMessage, isLastUserMessage, message, nextAssistantMessage, siblingInfo, toolMessages } (message.id)}
 			<LazyChatMessage
 				{chatActions}
