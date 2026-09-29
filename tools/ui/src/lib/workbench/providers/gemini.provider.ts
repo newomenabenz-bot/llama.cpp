@@ -34,6 +34,19 @@ export interface DiscoveredGeminiModel {
 }
 
 /**
+ * Result structure returned by verifyAndFetchGeminiModels.
+ */
+export interface ModelDiscoveryResult {
+	success: boolean;
+	models: Array<{ id: string; displayName: string; description: string }>;
+	error?: {
+		status?: number;
+		code?: string;
+		message: string;
+	};
+}
+
+/**
  * Gemini API inline part structure.
  */
 export interface GeminiPart {
@@ -411,6 +424,74 @@ export function formatGeminiContents(
 	return result;
 }
 
+/**
+ * Executes a live handshake against the Google Generative Language API.
+ * Verifies the key and returns active models or a structured API error response.
+ */
+export async function verifyAndFetchGeminiModels(
+	apiKey: string,
+	baseUrl: string = 'https://generativelanguage.googleapis.com',
+	signal?: AbortSignal
+): Promise<ModelDiscoveryResult> {
+	if (!apiKey?.trim()) {
+		return { success: false, models: [], error: { message: 'API key cannot be empty' } };
+	}
+	try {
+		const cleanKey = apiKey.trim();
+		const url = `${baseUrl.replace(/\/+$/, '')}/v1beta/models?key=${encodeURIComponent(cleanKey)}`;
+		const res = await fetch(url, { signal });
+		const data = (await res.json().catch(() => ({}))) as {
+			models?: Array<{
+				name: string;
+				displayName?: string;
+				description?: string;
+				supportedGenerationMethods?: string[];
+			}>;
+			error?: {
+				code?: number;
+				status?: string;
+				message?: string;
+			};
+		};
+
+		if (!res.ok) {
+			return {
+				success: false,
+				models: [],
+				error: {
+					status: res.status,
+					code: data?.error?.status || 'API_ERROR',
+					message:
+						data?.error?.message ||
+						`HTTP ${res.status}: Failed to authenticate with Google API`
+				}
+			};
+		}
+
+		const models = (data.models || [])
+			.filter((m) => m.supportedGenerationMethods?.includes('generateContent'))
+			.map((m) => ({
+				id: m.name.replace(/^models\//, ''),
+				displayName: m.displayName || m.name.replace(/^models\//, ''),
+				description: m.description || ''
+			}));
+
+		return { success: true, models };
+	} catch (err: unknown) {
+		const message =
+			err instanceof Error
+				? err.message
+				: 'Network error: Unable to reach Google API endpoint';
+		return {
+			success: false,
+			models: [],
+			error: {
+				message
+			}
+		};
+	}
+}
+
 export class GeminiProvider implements IModelProvider {
 	readonly id: ProviderId = 'gemini';
 	readonly name: string = 'Google Gemini';
@@ -475,8 +556,8 @@ export class GeminiProvider implements IModelProvider {
 	}
 
 	/**
-	 * Dynamically fetches available models from the Google Generative Language API.
-	 * Filters for models supporting 'generateContent'.
+	 * Executes a live handshake against the Google Generative Language API.
+	 * Verifies the key and returns active models or detailed error payload.
 	 */
 	static async fetchAvailableModels(
 		apiKey: string,
@@ -486,50 +567,16 @@ export class GeminiProvider implements IModelProvider {
 		const cleanKey = apiKey.trim();
 		if (!cleanKey) return [];
 
-		const url = `${baseUrl.replace(/\/+$/, '')}/v1beta/models?key=${encodeURIComponent(cleanKey)}`;
-		const response = await fetch(url, { signal });
-		if (!response.ok) {
-			const errorText = await response.text().catch(() => '');
-			let errorMsg = `HTTP ${response.status} ${response.statusText}`;
-			try {
-				const errJson = JSON.parse(errorText) as { error?: { message?: string } };
-				if (errJson?.error?.message) {
-					errorMsg = errJson.error.message;
-				}
-			} catch {
-				if (errorText) errorMsg = errorText;
-			}
-			throw new Error(`Failed to fetch Gemini models: ${errorMsg}`);
+		const result = await verifyAndFetchGeminiModels(cleanKey, baseUrl, signal);
+		if (!result.success) {
+			throw new Error(result.error?.message || 'Failed to fetch Gemini models');
 		}
 
-		const data = (await response.json()) as {
-			models?: Array<{
-				name: string;
-				displayName?: string;
-				description?: string;
-				supportedGenerationMethods?: string[];
-				inputTokenLimit?: number;
-				outputTokenLimit?: number;
-			}>;
-		};
-
-		if (!data.models || !Array.isArray(data.models)) {
-			return [];
-		}
-
-		return data.models
-			.filter((m) => m.supportedGenerationMethods?.includes('generateContent'))
-			.map((m) => {
-				const id = m.name.replace(/^models\//, '');
-				return {
-					id,
-					name: m.displayName || id,
-					description: m.description,
-					inputTokenLimit: m.inputTokenLimit,
-					outputTokenLimit: m.outputTokenLimit,
-					supportedGenerationMethods: m.supportedGenerationMethods
-				};
-			});
+		return result.models.map((m) => ({
+			id: m.id,
+			name: m.displayName || m.id,
+			description: m.description
+		}));
 	}
 
 	async fetchAvailableModels(signal?: AbortSignal): Promise<DiscoveredGeminiModel[]> {

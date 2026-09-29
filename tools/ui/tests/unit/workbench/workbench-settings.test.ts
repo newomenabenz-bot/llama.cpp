@@ -253,14 +253,15 @@ describe('ProviderSettings DOM Rendering', () => {
 		expect(body).toContain('Local llama-server');
 	});
 
-	it('renders Gemini API key input and model options when Gemini is active', () => {
+	it('renders Gemini API key input, Check Connection button, and disabled model selector before verification', () => {
 		localStorage.setItem(WORKBENCH_STORAGE_KEYS.ACTIVE_PROVIDER, 'gemini');
 		localStorage.setItem(WORKBENCH_STORAGE_KEYS.GEMINI_API_KEY, 'AIzaSyMockKey');
 
 		const { body } = render(ProviderSettings);
 		expect(body).toContain('Gemini API Key');
 		expect(body).toContain('Default Gemini Model');
-		expect(body).toContain('gemini-2.5-flash');
+		expect(body).toContain('Check Connection');
+		expect(body).toContain('No models available — verify API key first');
 		expect(body).toContain('Key Configured');
 	});
 });

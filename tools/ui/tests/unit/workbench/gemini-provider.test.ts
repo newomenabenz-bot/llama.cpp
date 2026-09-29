@@ -17,7 +17,8 @@ import {
 	cleanJsonSchema,
 	formatGeminiContents,
 	formatGeminiTools,
-	GeminiProvider
+	GeminiProvider,
+	verifyAndFetchGeminiModels
 } from '$lib/workbench/providers/gemini.provider';
 import { ProviderService } from '$lib/workbench/providers/provider.service';
 import { ContentPartType, MessageRole } from '$lib/enums';
@@ -604,5 +605,70 @@ describe('GeminiProvider Error Handling', () => {
 
 		expect(result).toBeUndefined();
 		expect(errorReported).toBe(false);
+	});
+});
+
+describe('verifyAndFetchGeminiModels', () => {
+	it('returns error when API key is empty', async () => {
+		const res = await verifyAndFetchGeminiModels('');
+		expect(res.success).toBe(false);
+		expect(res.models).toEqual([]);
+		expect(res.error?.message).toContain('API key cannot be empty');
+	});
+
+	it('returns error with status and code when Google API returns HTTP 400', async () => {
+		vi.stubGlobal(
+			'fetch',
+			vi.fn().mockResolvedValue({
+				ok: false,
+				status: 400,
+				json: async () => ({
+					error: {
+						code: 400,
+						message: 'API key not valid. Please pass a valid API key.',
+						status: 'INVALID_ARGUMENT'
+					}
+				})
+			})
+		);
+
+		const res = await verifyAndFetchGeminiModels('invalid-key');
+		expect(res.success).toBe(false);
+		expect(res.models).toEqual([]);
+		expect(res.error?.status).toBe(400);
+		expect(res.error?.code).toBe('INVALID_ARGUMENT');
+		expect(res.error?.message).toContain('API key not valid');
+	});
+
+	it('returns models when Google API returns success with generateContent models', async () => {
+		vi.stubGlobal(
+			'fetch',
+			vi.fn().mockResolvedValue({
+				ok: true,
+				status: 200,
+				json: async () => ({
+					models: [
+						{
+							name: 'models/gemini-2.5-flash',
+							displayName: 'Gemini 2.5 Flash',
+							description: 'Fast and intelligent',
+							supportedGenerationMethods: ['generateContent']
+						},
+						{
+							name: 'models/text-embedding-004',
+							displayName: 'Text Embedding',
+							description: 'Embedding model',
+							supportedGenerationMethods: ['embedContent']
+						}
+					]
+				})
+			})
+		);
+
+		const res = await verifyAndFetchGeminiModels('valid-key');
+		expect(res.success).toBe(true);
+		expect(res.models.length).toBe(1);
+		expect(res.models[0].id).toBe('gemini-2.5-flash');
+		expect(res.models[0].displayName).toBe('Gemini 2.5 Flash');
 	});
 });

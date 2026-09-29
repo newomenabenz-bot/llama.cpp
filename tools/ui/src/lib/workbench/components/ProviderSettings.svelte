@@ -1,5 +1,6 @@
 <script lang="ts">
 	import {
+		AlertTriangle,
 		Check,
 		Cpu,
 		ExternalLink,
@@ -8,7 +9,6 @@
 		Folder,
 		Key,
 		Loader2,
-		RefreshCw,
 		RotateCcw,
 		Shield,
 		ShieldAlert,
@@ -18,11 +18,11 @@
 	import { Badge } from '$lib/components/ui/badge';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
+	import { WorkbenchSettingsService } from '../settings/workbench-settings.service';
 	import {
-		DEFAULT_GEMINI_MODELS,
-		WorkbenchSettingsService
-	} from '../settings/workbench-settings.service';
-	import { GeminiProvider, type DiscoveredGeminiModel } from '../providers/gemini.provider';
+		verifyAndFetchGeminiModels,
+		type DiscoveredGeminiModel
+	} from '../providers/gemini.provider';
 	import type { ExecutionMode } from '../security/types';
 
 	let activeProvider = $state<'llama-server' | 'gemini'>(
@@ -36,30 +36,17 @@
 	let saveNotice = $state<boolean>(false);
 
 	const DISCOVERED_MODELS_CACHE_KEY = 'workbench_gemini_discovered_models';
-	let discoveredModels = $state<DiscoveredGeminiModel[]>([]);
-	let isLoadingModels = $state<boolean>(false);
-	let modelError = $state<string | null>(null);
+	let availableModels = $state<Array<{ id: string; displayName: string; description?: string }>>([]);
+	let isChecking = $state<boolean>(false);
+	let connectionStatus = $state<'idle' | 'success' | 'error'>('idle');
+	let apiErrorMessage = $state<string | null>(null);
+	let apiErrorCode = $state<string | null>(null);
 	let customModelInput = $state<string>('');
 	let isCustomModelMode = $state<boolean>(false);
 
-	// Load cached discovered models on initialization if present
-	if (typeof localStorage !== 'undefined') {
-		try {
-			const cached = localStorage.getItem(DISCOVERED_MODELS_CACHE_KEY);
-			if (cached) {
-				const parsed = JSON.parse(cached);
-				if (Array.isArray(parsed) && parsed.length > 0) {
-					discoveredModels = parsed;
-				}
-			}
-		} catch {
-			// ignore cache error
-		}
-	}
-
 	// Check if selectedModel is a custom model not in discovered models
 	$effect(() => {
-		if (selectedModel && discoveredModels.length > 0 && !discoveredModels.some((m) => m.id === selectedModel)) {
+		if (selectedModel && availableModels.length > 0 && !availableModels.some((m) => m.id === selectedModel)) {
 			customModelInput = selectedModel;
 			isCustomModelMode = true;
 		}
@@ -67,66 +54,77 @@
 
 	let isConfigured = $derived(Boolean(apiKey.trim()));
 
-	async function fetchModels(keyToUse?: string) {
-		const key = (keyToUse ?? apiKey).trim();
+	async function handleCheckConnection() {
+		const key = apiKey.trim();
 		if (!key) {
-			modelError = 'Enter a valid Gemini API key to discover live models';
+			connectionStatus = 'error';
+			apiErrorCode = 'API_KEY_REQUIRED';
+			apiErrorMessage = 'API key cannot be empty';
 			return;
 		}
 
-		isLoadingModels = true;
-		modelError = null;
+		isChecking = true;
+		connectionStatus = 'idle';
+		apiErrorMessage = null;
+		apiErrorCode = null;
+
 		try {
-			const models = await GeminiProvider.fetchAvailableModels(key);
-			discoveredModels = models;
-			if (typeof localStorage !== 'undefined') {
-				try {
-					localStorage.setItem(DISCOVERED_MODELS_CACHE_KEY, JSON.stringify(models));
-				} catch {
-					// storage quota or unavailable
+			const result = await verifyAndFetchGeminiModels(key);
+			if (result.success) {
+				connectionStatus = 'success';
+				availableModels = result.models;
+				apiErrorMessage = null;
+				apiErrorCode = null;
+
+				// Auto-persistence: persist API key and active model selection in localStorage
+				WorkbenchSettingsService.setGeminiApiKey(key);
+				if (typeof localStorage !== 'undefined') {
+					try {
+						localStorage.setItem(DISCOVERED_MODELS_CACHE_KEY, JSON.stringify(result.models));
+					} catch {
+						// storage quota
+					}
 				}
-			}
-			if (models.length > 0 && !isCustomModelMode) {
-				const hasSelected = models.some((m) => m.id === selectedModel);
-				if (!hasSelected) {
-					const flashModel = models.find((m) => m.id.includes('flash')) || models[0];
-					selectedModel = flashModel.id;
-					WorkbenchSettingsService.setGeminiModel(selectedModel);
+
+				if (result.models.length > 0 && !isCustomModelMode) {
+					const hasCurrent = result.models.some((m) => m.id === selectedModel);
+					if (!hasCurrent) {
+						const flashModel = result.models.find((m) => m.id.includes('flash')) || result.models[0];
+						selectedModel = flashModel.id;
+						WorkbenchSettingsService.setGeminiModel(selectedModel);
+					}
 				}
+				showSaveFeedback();
+			} else {
+				connectionStatus = 'error';
+				availableModels = [];
+				apiErrorCode = result.error?.code || (result.error?.status ? `HTTP_${result.error.status}` : 'API_ERROR');
+				apiErrorMessage = result.error?.message || 'Failed to authenticate with Google API';
 			}
-		} catch (err) {
-			const msg = err instanceof Error ? err.message : String(err);
-			modelError = msg;
+		} catch (err: unknown) {
+			connectionStatus = 'error';
+			availableModels = [];
+			apiErrorCode = 'NETWORK_ERROR';
+			apiErrorMessage = err instanceof Error ? err.message : 'Network error: Unable to reach Google API endpoint';
 		} finally {
-			isLoadingModels = false;
+			isChecking = false;
 		}
 	}
-
-	// Trigger model fetch when API key is present
-	$effect(() => {
-		const key = apiKey.trim();
-		if (key && activeProvider === 'gemini' && discoveredModels.length === 0 && !isLoadingModels && !modelError) {
-			void fetchModels(key);
-		}
-	});
 
 	function selectProvider(provider: 'llama-server' | 'gemini') {
 		activeProvider = provider;
 		WorkbenchSettingsService.setActiveProviderId(provider);
 		showSaveFeedback();
-		if (provider === 'gemini' && apiKey.trim() && discoveredModels.length === 0 && !isLoadingModels) {
-			void fetchModels(apiKey.trim());
-		}
 	}
 
 	function handleApiKeyInput(e: Event) {
 		const target = e.target as HTMLInputElement;
 		apiKey = target.value;
 		WorkbenchSettingsService.setGeminiApiKey(apiKey);
+		connectionStatus = 'idle';
+		apiErrorMessage = null;
+		apiErrorCode = null;
 		showSaveFeedback();
-		if (apiKey.trim().length > 10) {
-			void fetchModels(apiKey.trim());
-		}
 	}
 
 	function handleModelSelect(e: Event) {
@@ -267,7 +265,7 @@
 		<!-- Gemini Specific Configuration Fields -->
 		{#if activeProvider === 'gemini'}
 			<div class="mt-5 space-y-4 rounded-lg bg-muted/20 border border-border/40 p-4">
-				<!-- API Key Input -->
+				<!-- API Key Input & Check Connection Button -->
 				<div>
 					<div class="flex items-center justify-between mb-1.5">
 						<label for="gemini-api-key" class="text-xs font-medium flex items-center gap-1.5">
@@ -283,30 +281,84 @@
 							Get API key <ExternalLink class="h-2.5 w-2.5" />
 						</a>
 					</div>
-					<div class="relative">
-						<Input
-							id="gemini-api-key"
-							type={showApiKey ? 'text' : 'password'}
-							placeholder="AIzaSy..."
-							value={apiKey}
-							oninput={handleApiKeyInput}
-							class="pr-10 font-mono text-xs"
-						/>
+					<div class="flex gap-2 items-center">
+						<div class="relative flex-1">
+							<Input
+								id="gemini-api-key"
+								type={showApiKey ? 'text' : 'password'}
+								placeholder="AIzaSy..."
+								value={apiKey}
+								oninput={handleApiKeyInput}
+								class="pr-10 font-mono text-xs"
+							/>
+							<Button
+								type="button"
+								variant="ghost"
+								size="sm"
+								class="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
+								onclick={() => (showApiKey = !showApiKey)}
+							>
+								{#if showApiKey}
+									<EyeOff class="h-3.5 w-3.5" />
+								{:else}
+									<Eye class="h-3.5 w-3.5" />
+								{/if}
+							</Button>
+						</div>
 						<Button
 							type="button"
-							variant="ghost"
-							size="sm"
-							class="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
-							onclick={() => (showApiKey = !showApiKey)}
+							variant="default"
+							class="shrink-0 h-9 text-xs px-3 font-medium flex items-center gap-1.5"
+							disabled={isChecking || !apiKey.trim()}
+							onclick={handleCheckConnection}
 						>
-							{#if showApiKey}
-								<EyeOff class="h-3.5 w-3.5" />
+							{#if isChecking}
+								<Loader2 class="h-3.5 w-3.5 animate-spin" />
+								<span>Checking...</span>
 							{:else}
-								<Eye class="h-3.5 w-3.5" />
+								<Sparkles class="h-3.5 w-3.5 text-amber-300" />
+								<span>Check Connection</span>
 							{/if}
 						</Button>
 					</div>
-					<p class="text-[11px] text-muted-foreground mt-1">
+
+					<!-- Real-Time Status / Error Banners -->
+					{#if connectionStatus === 'success'}
+						<div
+							class="mt-2.5 p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 text-xs flex items-center justify-between gap-2"
+							data-testid="gemini-connection-success"
+						>
+							<div class="flex items-center gap-2">
+								<Check class="h-4 w-4 shrink-0 text-emerald-500" />
+								<span class="font-medium">
+									✓ Connected successfully. Discovered {availableModels.length} active models.
+								</span>
+							</div>
+							<Badge
+								variant="outline"
+								class="border-emerald-500/40 text-[10px] text-emerald-600 dark:text-emerald-400 bg-emerald-500/10"
+							>
+								{availableModels.length} Models Verified
+							</Badge>
+						</div>
+					{:else if connectionStatus === 'error'}
+						<div
+							class="mt-2.5 p-3 rounded-lg bg-destructive/10 border border-destructive/30 text-destructive text-xs flex items-start gap-2.5"
+							data-testid="gemini-connection-error"
+						>
+							<AlertTriangle class="h-4 w-4 shrink-0 mt-0.5 text-destructive" />
+							<div class="flex-1 min-w-0">
+								<p class="font-semibold text-xs leading-tight">
+									✕ Connection Failed ({apiErrorCode || 'API_ERROR'}):
+								</p>
+								<p class="text-[11px] text-destructive/90 mt-1 break-words font-mono">
+									{apiErrorMessage}
+								</p>
+							</div>
+						</div>
+					{/if}
+
+					<p class="text-[11px] text-muted-foreground mt-1.5">
 						Stored securely in your local browser storage. Never transmitted to third-party servers.
 					</p>
 				</div>
@@ -318,69 +370,40 @@
 							<Sparkles class="h-3.5 w-3.5 text-amber-500" />
 							Default Gemini Model
 						</label>
-						<Button
-							type="button"
-							variant="ghost"
-							size="sm"
-							class="h-6 px-2 text-[11px] gap-1 text-muted-foreground hover:text-foreground"
-							disabled={isLoadingModels || !apiKey.trim()}
-							onclick={() => void fetchModels()}
-							title="Query Google API for live active models"
-						>
-							<RefreshCw class="h-3 w-3 {isLoadingModels ? 'animate-spin' : ''}" />
-							<span>{isLoadingModels ? 'Fetching...' : 'Refresh Models'}</span>
-						</Button>
+						{#if connectionStatus === 'success'}
+							<Badge variant="outline" class="text-[10px] border-emerald-500/40 text-emerald-600 dark:text-emerald-400">
+								{availableModels.length} Live Models
+							</Badge>
+						{/if}
 					</div>
 
-					{#if modelError}
-						<div class="mb-2 text-[11px] text-rose-500 bg-rose-500/10 border border-rose-500/20 rounded p-2">
-							{modelError}
-						</div>
-					{/if}
-
-					{#if discoveredModels.length > 0}
-						<select
-							id="gemini-model-select"
-							value={isCustomModelMode ? '__custom__' : selectedModel}
-							onchange={handleModelSelect}
-							class="w-full rounded-md border border-input bg-background px-3 py-2 text-xs shadow-xs focus:outline-hidden focus:ring-1 focus:ring-ring"
-						>
-							{#each discoveredModels as model}
+					<select
+						id="gemini-model-select"
+						value={isCustomModelMode ? '__custom__' : selectedModel}
+						onchange={handleModelSelect}
+						disabled={availableModels.length === 0 && !isCustomModelMode}
+						class="w-full rounded-md border border-input bg-background px-3 py-2 text-xs shadow-xs focus:outline-hidden focus:ring-1 focus:ring-ring disabled:opacity-50 disabled:cursor-not-allowed"
+					>
+						{#if availableModels.length === 0}
+							<option value="" disabled selected>No models available — verify API key first</option>
+						{:else}
+							{#each availableModels as model}
 								<option value={model.id}>
-									{model.name} ({model.id})
+									{model.displayName} ({model.id})
 								</option>
 							{/each}
-							<option value="__custom__">⚙ Auto / Custom Model Identifier...</option>
-						</select>
+						{/if}
+						<option value="__custom__">⚙ Auto / Custom Model Identifier...</option>
+					</select>
+
+					{#if availableModels.length > 0}
 						<p class="text-[10px] text-muted-foreground mt-1">
-							{discoveredModels.length} active models discovered from Google Generative Language API
+							{availableModels.length} active models returned by Google Generative Language API
 						</p>
-					{:else if isLoadingModels}
-						<div class="flex items-center gap-2 p-2.5 rounded-md border border-border/40 bg-background text-xs text-muted-foreground">
-							<Loader2 class="h-3.5 w-3.5 animate-spin text-primary" />
-							<span>Querying Google Generative Language API for models...</span>
-						</div>
-					{:else}
-						<div class="space-y-2">
-							<select
-								id="gemini-model-select"
-								value={isCustomModelMode ? '__custom__' : selectedModel}
-								onchange={handleModelSelect}
-								class="w-full rounded-md border border-input bg-background px-3 py-2 text-xs shadow-xs focus:outline-hidden focus:ring-1 focus:ring-ring"
-							>
-								{#each DEFAULT_GEMINI_MODELS as model}
-									<option value={model.id}>
-										{model.name} — {model.description}
-									</option>
-								{/each}
-								<option value="__custom__">⚙ Auto / Custom Model Identifier...</option>
-							</select>
-							{#if apiKey.trim()}
-								<p class="text-[10px] text-amber-500/90">
-									Click "Refresh Models" above to query live models with your API key.
-								</p>
-							{/if}
-						</div>
+					{:else if connectionStatus !== 'error'}
+						<p class="text-[10px] text-muted-foreground mt-1">
+							Click "Check Connection" above to verify your key and discover available models.
+						</p>
 					{/if}
 
 					<!-- Auto / Custom Model Input -->

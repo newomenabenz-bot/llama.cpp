@@ -18,29 +18,6 @@ export const WORKBENCH_STORAGE_KEYS = {
 	WORKSPACE_ROOT: 'workbench_workspace_root'
 } as const;
 
-export const DEFAULT_GEMINI_MODELS = [
-	{
-		id: 'gemini-2.5-flash',
-		name: 'Gemini 2.5 Flash',
-		description: 'Fastest multimodal model with native reasoning'
-	},
-	{
-		id: 'gemini-2.5-pro',
-		name: 'Gemini 2.5 Pro',
-		description: 'Most capable model for complex coding and deep reasoning'
-	},
-	{
-		id: 'gemini-1.5-flash',
-		name: 'Gemini 1.5 Flash',
-		description: 'High-speed lightweight multimodal workhorse'
-	},
-	{
-		id: 'gemini-1.5-pro',
-		name: 'Gemini 1.5 Pro',
-		description: 'Extended context reasoning model'
-	}
-] as const;
-
 export interface WorkbenchSettings {
 	activeProviderId: 'llama-server' | 'gemini';
 	geminiApiKey: string;
