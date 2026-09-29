@@ -70,14 +70,37 @@ export default defineConfig(({ mode }) => {
 					inlineDynamicImports: false,
 					manualChunks(id: string) {
 						if (
+							id.includes('mermaid') ||
+							id.includes('d3') ||
+							id.includes('dagre') ||
+							id.includes('cytoscape') ||
+							id.includes('elkjs') ||
+							id.includes('khroma') ||
+							id.includes('stylis')
+						) {
+							return 'vendor-diagrams';
+						}
+						if (
+							id.includes('marked') ||
+							id.includes('highlight.js') ||
+							id.includes('rehype-highlight') ||
 							id.includes('nerdamer') ||
 							id.includes('katex') ||
 							id.includes('rehype-katex') ||
 							id.includes('remark-math') ||
 							id.includes('big-integer') ||
-							id.includes('decimal.js')
+							id.includes('decimal.js') ||
+							id.includes('remark') ||
+							id.includes('rehype') ||
+							id.includes('unified') ||
+							id.includes('unist') ||
+							id.includes('mdast') ||
+							id.includes('mdsvex') ||
+							id.includes('dompurify') ||
+							id.includes('micromark') ||
+							id.includes('vfile')
 						) {
-							return 'vendor-math';
+							return 'vendor-render';
 						}
 						if (
 							id.includes('@lucide/svelte') ||
@@ -89,47 +112,8 @@ export default defineConfig(({ mode }) => {
 						) {
 							return 'vendor-ui';
 						}
-						if (
-							id.includes('d3') ||
-							id.includes('dagre') ||
-							id.includes('cytoscape')
-						) {
-							return 'vendor-graph';
-						}
-						if (
-							id.includes('mermaid') ||
-							id.includes('khroma') ||
-							id.includes('stylis')
-						) {
-							return 'vendor-mermaid';
-						}
-						if (
-							id.includes('highlight.js') ||
-							id.includes('rehype-highlight')
-						) {
-							return 'vendor-highlight';
-						}
-						if (
-							id.includes('remark') ||
-							id.includes('rehype') ||
-							id.includes('unified') ||
-							id.includes('unist') ||
-							id.includes('mdast') ||
-							id.includes('mdsvex') ||
-							id.includes('dompurify') ||
-							id.includes('micromark') ||
-							id.includes('vfile')
-						) {
-							return 'vendor-markdown';
-						}
 						if (id.includes('pdfjs-dist') || id.includes('fflate')) {
 							return 'vendor-pdf';
-						}
-						if (
-							id.includes('/src/lib/workbench/') ||
-							id.includes('\\src\\lib\\workbench\\')
-						) {
-							return 'workbench-core';
 						}
 					}
 				}
