@@ -209,6 +209,13 @@
 							>
 								exit {record.exitCode}
 							</Badge>
+						{:else if record.status === 'failed'}
+							<Badge
+								variant="outline"
+								class="text-[9px] px-1 py-0 ml-1 font-mono text-rose-400 border-rose-500/30 bg-rose-500/10"
+							>
+								failed
+							</Badge>
 						{/if}
 
 						{#if record.durationMs !== undefined}
@@ -235,6 +242,12 @@
 							class="mt-1 pl-3 border-l-2 border-zinc-800 text-zinc-300 font-mono text-xs whitespace-pre-wrap break-all overflow-x-auto"
 						>
 							{record.output}
+						</div>
+					{:else if record.error}
+						<div
+							class="mt-1 pl-3 border-l-2 border-rose-900/40 text-rose-400 font-mono text-xs whitespace-pre-wrap break-all overflow-x-auto"
+						>
+							{record.error}
 						</div>
 					{:else if record.status === 'running'}
 						<div class="mt-1 pl-3 border-l-2 border-zinc-800 text-zinc-500 italic text-[11px]">

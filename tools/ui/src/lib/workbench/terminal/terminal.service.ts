@@ -55,8 +55,8 @@ export class WorkbenchTerminalService {
 			cwd
 		);
 
-		// If policy denies execution, abort immediately
-		if (evalResult.action === 'DENY') {
+		// If policy denies execution or command is CRITICAL host self-destruction, abort immediately
+		if (evalResult.action === 'DENY' || classification.risk === 'CRITICAL') {
 			const denialReason =
 				evalResult.syntheticRejection ||
 				`Command denied by security policy (${classification.risk} risk): ${classification.reason}`;
@@ -65,6 +65,7 @@ export class WorkbenchTerminalService {
 			record.output = denialReason;
 			record.completedAt = Date.now();
 			record.durationMs = 0;
+			record.exitCode = 1;
 
 			auditStore.updateReceiptStatus(evalResult.receiptId, 'DENIED', 0);
 			if (onChunk) {
@@ -119,9 +120,10 @@ export class WorkbenchTerminalService {
 			} else {
 				record.status = 'failed';
 				record.error = err instanceof Error ? err.message : String(err);
-				if (!record.output) {
-					record.output = record.error;
-				}
+				record.exitCode = record.exitCode ?? 1;
+				record.output = record.output
+					? `${record.output}\n[Process execution failed: ${record.error}]`
+					: `[Process execution failed: ${record.error}]`;
 			}
 
 			auditStore.updateReceiptStatus(evalResult.receiptId, 'ERROR', record.durationMs);

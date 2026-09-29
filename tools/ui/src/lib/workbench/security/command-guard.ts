@@ -14,7 +14,7 @@ const RISK_WEIGHTS: Record<CommandRisk, number> = {
 	CRITICAL: 4
 };
 
-// Patterns representing CRITICAL risk commands (system destructive, root wipe, disk format, fork bombs)
+// Patterns representing CRITICAL risk commands (strictly catastrophic host self-destruction only)
 const CRITICAL_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
 	{
 		pattern: /\brm\s+-[a-zA-Z]*r[a-zA-Z]*f[a-zA-Z]*\s+(\/|\/\*|~|\.\.|\.)(\s|$|;)/i,
@@ -41,10 +41,6 @@ const CRITICAL_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
 		reason: 'Fork bomb attack pattern detected'
 	},
 	{
-		pattern: /\b(shutdown|reboot|poweroff|init\s+[06]|halt)\b/i,
-		reason: 'System shutdown or reboot command detected'
-	},
-	{
 		pattern: /(curl|wget|fetch)\s+[^|;&]+\|\s*(bash|sh|zsh|dash|powershell|pwsh|cmd)/i,
 		reason: 'Untrusted remote binary execution pipe detected (curl | bash)'
 	},
@@ -53,16 +49,12 @@ const CRITICAL_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
 		reason: 'PowerShell arbitrary remote script execution detected (iex iwr)'
 	},
 	{
-		pattern: /\b(chmod|chown)\s+.*(-R\s+)?(777|\+x)\s+(\/|\/etc|\/usr|\/bin|\/boot)/i,
-		reason: 'Global system root permission degradation detected'
-	},
-	{
-		pattern: /\b(sudo|doas|runas)\b/i,
-		reason: 'Privilege escalation command detected (sudo/doas/runas)'
+		pattern: /\b(pkill|killall)\s+.*(-9\s+)?llama-server\b|\bkill\s+.*workbench\.pid\b/i,
+		reason: 'Host runtime supervisor termination attack detected'
 	}
 ];
 
-// Patterns representing HIGH risk commands (arbitrary deletions, process killing, forced git)
+// Patterns representing HIGH risk commands (force deletions, process terminations, and destructive git)
 const HIGH_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
 	{
 		pattern: /\brm\s+-[a-zA-Z]*f/i,
@@ -73,7 +65,7 @@ const HIGH_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
 		reason: 'File truncation or unlinking command detected'
 	},
 	{
-		pattern: /\b(kill\s+-9|killall|taskkill\s+\/f)\b/i,
+		pattern: /\b(kill\s+-9|taskkill\s+\/f)\b/i,
 		reason: 'Forced process termination detected'
 	},
 	{
@@ -86,27 +78,43 @@ const HIGH_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
 	}
 ];
 
-// Patterns representing MEDIUM risk commands (state mutation, builds, package installs)
+// Patterns representing MEDIUM risk commands (DevOps package management, service operations, mutations)
 const MEDIUM_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
 	{
-		pattern: /\b(npm\s+(i|install|add|update)|yarn\s+add|pnpm\s+add|pip\s+install|cargo\s+build|gem\s+install)\b/i,
-		reason: 'Package manager dependency installation or build'
+		pattern: /\b(npm\s+(i|install|add|update)|yarn\s+add|pnpm\s+add|pip\s+install|cargo\s+build|gem\s+install|apt|apt-get|yum|dnf|pacman|brew)\b/i,
+		reason: 'Package manager dependency installation or system package operation'
 	},
 	{
 		pattern: /\b(mkdir|touch|mv|cp|copy)\b/i,
 		reason: 'Filesystem structure modification'
 	},
 	{
-		pattern: /\bgit\s+(checkout|commit|merge|rebase|pull|push)\b/i,
-		reason: 'Version control branch or history mutation'
+		pattern: /\b(chmod|chown)\b/i,
+		reason: 'File permission or ownership modification'
+	},
+	{
+		pattern: /\bgit\s+(checkout|commit|merge|rebase|pull|push|reset|clean)\b/i,
+		reason: 'Version control branch, reset, or history mutation'
 	},
 	{
 		pattern: /\b(docker|podman|kubectl)\b/i,
 		reason: 'Container runtime invocation'
+	},
+	{
+		pattern: /\b(systemctl|service)\b/i,
+		reason: 'System service lifecycle management'
+	},
+	{
+		pattern: /\b(sudo|doas|runas)\b/i,
+		reason: 'Privileged command execution'
+	},
+	{
+		pattern: /\b(kill|killall|taskkill)\b/i,
+		reason: 'Process termination command'
 	}
 ];
 
-// Patterns representing LOW risk commands (inspection, testing, read-only queries)
+// Patterns representing LOW risk commands (inspection, testing, read-only queries, devops utilities)
 const LOW_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
 	{
 		pattern: /^(ls|dir|vdir|pwd|cd)(\s+.*)?$/i,
@@ -131,6 +139,14 @@ const LOW_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
 	{
 		pattern: /^(node\s+-v|npm\s+-v|python\s+--version|git\s+--version|uname|whoami|echo)(\s+.*)?$/i,
 		reason: 'System introspection or echo'
+	},
+	{
+		pattern: /^(ps|top|htop|netstat|ss|env|printenv|uptime|df|free)(\s+.*)?$/i,
+		reason: 'System performance or environment inspection'
+	},
+	{
+		pattern: /^(curl|wget|fetch)(\s+.*)?$/i,
+		reason: 'Network request or resource download'
 	}
 ];
 

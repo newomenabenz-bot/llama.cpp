@@ -102,34 +102,56 @@ export class TerminalStore {
 				(chunk) => {
 					// Update live output in both activeRecord and history entry
 					inFlightRecord.output += chunk;
+					this.activeRecord = { ...inFlightRecord };
+					this.history = this.history.map((r) =>
+						r.id === inFlightRecord.id ? { ...inFlightRecord } : r
+					);
 				},
 				this.abortController.signal
 			);
 
-			// Merge final attributes
-			inFlightRecord.status = finalRecord.status;
-			inFlightRecord.exitCode = finalRecord.exitCode;
-			inFlightRecord.durationMs = finalRecord.durationMs;
-			inFlightRecord.completedAt = finalRecord.completedAt;
-			inFlightRecord.risk = finalRecord.risk;
-			inFlightRecord.error = finalRecord.error;
-			inFlightRecord.output = finalRecord.output;
+			// Merge final attributes creating a fresh immutable object to trigger Svelte 5 each reactivity
+			const completedRecord: TerminalExecutionRecord = {
+				...inFlightRecord,
+				status: finalRecord.status,
+				exitCode: finalRecord.exitCode,
+				durationMs: finalRecord.durationMs,
+				completedAt: finalRecord.completedAt,
+				risk: finalRecord.risk,
+				error: finalRecord.error,
+				output:
+					finalRecord.output ||
+					(finalRecord.status === 'failed'
+						? finalRecord.error || 'Command execution failed'
+						: inFlightRecord.output)
+			};
 
-			this.activeRecord = { ...inFlightRecord };
-			// Trigger reactivity for history array
-			this.history = [...this.history];
+			this.activeRecord = completedRecord;
+			this.history = this.history.map((r) =>
+				r.id === inFlightRecord.id ? completedRecord : r
+			);
 
-			return inFlightRecord;
+			return completedRecord;
 		} catch (err: unknown) {
-			inFlightRecord.status = 'failed';
-			inFlightRecord.error = err instanceof Error ? err.message : String(err);
-			inFlightRecord.completedAt = Date.now();
-			inFlightRecord.durationMs = inFlightRecord.completedAt - startedAt;
+			const errMsg = err instanceof Error ? err.message : String(err);
+			const failedRecord: TerminalExecutionRecord = {
+				...inFlightRecord,
+				status: 'failed',
+				error: errMsg,
+				output: inFlightRecord.output
+					? `${inFlightRecord.output}\n[Process execution failed: ${errMsg}]`
+					: `[Process execution failed: ${errMsg}]`,
+				completedAt: Date.now(),
+				durationMs: Date.now() - startedAt,
+				exitCode: 1
+			};
 
-			this.activeRecord = { ...inFlightRecord };
-			this.history = [...this.history];
+			this.activeRecord = failedRecord;
+			this.history = this.history.map((r) =>
+				r.id === inFlightRecord.id ? failedRecord : r
+			);
 
-			return inFlightRecord;
+			return failedRecord;
 		} finally {
 			this.isRunning = false;
 			this.abortController = null;

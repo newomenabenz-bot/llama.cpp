@@ -22,6 +22,18 @@ import { ChatService } from '$lib/services/chat.service';
 import { WorkbenchContextBudgetService } from '../context';
 
 /**
+ * Discovered model metadata from Google Generative Language API.
+ */
+export interface DiscoveredGeminiModel {
+	id: string;
+	name: string;
+	description?: string;
+	inputTokenLimit?: number;
+	outputTokenLimit?: number;
+	supportedGenerationMethods?: string[];
+}
+
+/**
  * Gemini API inline part structure.
  */
 export interface GeminiPart {
@@ -460,6 +472,70 @@ export class GeminiProvider implements IModelProvider {
 
 	async isAvailable(): Promise<boolean> {
 		return this.isConfigured();
+	}
+
+	/**
+	 * Dynamically fetches available models from the Google Generative Language API.
+	 * Filters for models supporting 'generateContent'.
+	 */
+	static async fetchAvailableModels(
+		apiKey: string,
+		baseUrl: string = 'https://generativelanguage.googleapis.com',
+		signal?: AbortSignal
+	): Promise<DiscoveredGeminiModel[]> {
+		const cleanKey = apiKey.trim();
+		if (!cleanKey) return [];
+
+		const url = `${baseUrl.replace(/\/+$/, '')}/v1beta/models?key=${encodeURIComponent(cleanKey)}`;
+		const response = await fetch(url, { signal });
+		if (!response.ok) {
+			const errorText = await response.text().catch(() => '');
+			let errorMsg = `HTTP ${response.status} ${response.statusText}`;
+			try {
+				const errJson = JSON.parse(errorText) as { error?: { message?: string } };
+				if (errJson?.error?.message) {
+					errorMsg = errJson.error.message;
+				}
+			} catch {
+				if (errorText) errorMsg = errorText;
+			}
+			throw new Error(`Failed to fetch Gemini models: ${errorMsg}`);
+		}
+
+		const data = (await response.json()) as {
+			models?: Array<{
+				name: string;
+				displayName?: string;
+				description?: string;
+				supportedGenerationMethods?: string[];
+				inputTokenLimit?: number;
+				outputTokenLimit?: number;
+			}>;
+		};
+
+		if (!data.models || !Array.isArray(data.models)) {
+			return [];
+		}
+
+		return data.models
+			.filter((m) => m.supportedGenerationMethods?.includes('generateContent'))
+			.map((m) => {
+				const id = m.name.replace(/^models\//, '');
+				return {
+					id,
+					name: m.displayName || id,
+					description: m.description,
+					inputTokenLimit: m.inputTokenLimit,
+					outputTokenLimit: m.outputTokenLimit,
+					supportedGenerationMethods: m.supportedGenerationMethods
+				};
+			});
+	}
+
+	async fetchAvailableModels(signal?: AbortSignal): Promise<DiscoveredGeminiModel[]> {
+		const key = this.getApiKey();
+		if (!key) return [];
+		return GeminiProvider.fetchAvailableModels(key, this.baseUrl, signal);
 	}
 
 	/**

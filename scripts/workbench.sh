@@ -46,6 +46,7 @@ WORKBENCH_WORKSPACE_DIR="$(resolve_path "${WORKBENCH_WORKSPACE_DIR:-$APP_ROOT/da
 WORKBENCH_LOG_FILE="$(resolve_path "${WORKBENCH_LOG_FILE:-$APP_ROOT/data/logs/workbench.log}")"
 WORKBENCH_PID_FILE="$(resolve_path "${WORKBENCH_PID_FILE:-$APP_ROOT/data/workbench.pid}")"
 WORKBENCH_API_KEY="${WORKBENCH_API_KEY:-}"
+WORKBENCH_ENABLE_TOOLS="${WORKBENCH_ENABLE_TOOLS:-all}"
 
 SERVER_BIN="$APP_ROOT/bin/llama-server"
 
@@ -125,6 +126,13 @@ do_start() {
 
 	if [ -n "$WORKBENCH_API_KEY" ]; then
 		args+=(--api-key "$WORKBENCH_API_KEY")
+	fi
+
+	# Native Tool Engine & Jinja Tool Calling Support (DEF-QA-001)
+	if [ -n "$WORKBENCH_ENABLE_TOOLS" ]; then
+		args+=(--tools "$WORKBENCH_ENABLE_TOOLS" --jinja)
+	else
+		args+=(--tools all --jinja)
 	fi
 
 	echo "[INFO] Starting Llama Workbench on http://${WORKBENCH_HOST}:${WORKBENCH_PORT}..."

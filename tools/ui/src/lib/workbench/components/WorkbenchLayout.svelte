@@ -23,6 +23,7 @@
 	import { agenticStore } from '$lib/stores/agentic/index.svelte';
 	import { conversationsStore } from '$lib/stores/conversations/index.svelte';
 	import { WorkbenchAgentCheckpointService } from '../persistence/checkpoint.service';
+	import { WorkbenchRecoveryCoordinator } from '../persistence/recovery.coordinator';
 	import { terminalStore } from '../terminal/terminal.svelte';
 	import { workbenchShellStore } from '../shell/shell.svelte';
 	import { workspaceStore } from '../workspace/workspace.svelte';
@@ -69,8 +70,18 @@
 	let rootPath = $derived(workspaceStore.rootPath);
 	let activeConvId = $derived(conversationsStore.activeConversation?.id ?? '');
 
+	let recoveryRevision = $state(0);
+
+	$effect(() => {
+		const unsubscribe = WorkbenchRecoveryCoordinator.subscribe(() => {
+			recoveryRevision += 1;
+		});
+		return unsubscribe;
+	});
+
 	// Persistent status summary derivation
 	let agentStatusSummary = $derived.by(() => {
+		void recoveryRevision;
 		const convId = activeConvId;
 		if (!convId)
 			return {

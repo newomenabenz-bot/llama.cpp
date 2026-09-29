@@ -1,5 +1,6 @@
 <script lang="ts">
 	import {
+		AlertTriangle,
 		ChevronsDownUp,
 		ChevronsUpDown,
 		FileCode,
@@ -232,10 +233,42 @@
 						type="search"
 						bind:value={searchQuery}
 						placeholder="Filter files..."
-						class="h-8 pl-8 text-xs bg-muted/20"
+						class="h-8 pl-8 pr-8 text-xs bg-muted/20"
 					/>
+					{#if searchQuery}
+						<button
+							type="button"
+							class="absolute right-2 text-muted-foreground hover:text-foreground p-0.5 rounded transition-colors"
+							onclick={() => (searchQuery = '')}
+							aria-label="Clear filter"
+						>
+							<X class="size-3.5" />
+						</button>
+					{/if}
 				</div>
 			</div>
+
+			<!-- Error Banner -->
+			{#if workspaceStore.error}
+				<div
+					class="m-2 p-2.5 rounded-md bg-destructive/10 border border-destructive/30 text-destructive text-xs flex items-start gap-2 shrink-0"
+					data-testid="workspace-error-banner"
+				>
+					<AlertTriangle class="size-4 shrink-0 mt-0.5" />
+					<div class="flex-1 min-w-0">
+						<p class="font-medium leading-tight">Failed to load workspace</p>
+						<p class="text-[11px] text-destructive/80 mt-0.5 break-words">{workspaceStore.error}</p>
+					</div>
+					<Button
+						variant="outline"
+						size="sm"
+						class="h-6 text-[10px] px-2 border-destructive/30 hover:bg-destructive/20 text-destructive shrink-0"
+						onclick={handleRefresh}
+					>
+						Retry
+					</Button>
+				</div>
+			{/if}
 
 			<!-- Scrollable Tree Container -->
 			<div
@@ -252,7 +285,7 @@
 					<div class="flex flex-col items-center justify-center h-48 text-center p-4 text-muted-foreground">
 						<FileCode class="size-8 opacity-30 mb-2" />
 						<p class="text-xs font-medium text-foreground/70">
-							{searchQuery ? 'No matching files found' : 'No workspace files detected'}
+							{searchQuery ? 'No matching files found' : (workspaceStore.error ? 'Workspace scan failed' : 'No workspace files detected')}
 						</p>
 						<p class="text-[11px] text-muted-foreground/60 mt-1">
 							{searchQuery ? 'Try clearing your filter search' : 'Click refresh to scan the workspace'}
