@@ -16,10 +16,28 @@ export class ProviderService {
 	private static hydrated = false;
 
 	/**
+	 * Resolves alias IDs to canonical provider IDs.
+	 */
+	private static resolveId(id: ProviderId): ProviderId {
+		if (id === 'google-gemini') return 'gemini';
+		if (id === 'local-llama') return 'llama-server';
+		return id;
+	}
+
+	/**
 	 * Registers a model provider instance.
 	 */
 	static registerProvider(provider: IModelProvider): void {
 		this.providers.set(provider.id, provider);
+		if (provider.id === 'gemini') {
+			this.providers.set('google-gemini', provider);
+		} else if (provider.id === 'google-gemini') {
+			this.providers.set('gemini', provider);
+		} else if (provider.id === 'llama-server') {
+			this.providers.set('local-llama', provider);
+		} else if (provider.id === 'local-llama') {
+			this.providers.set('llama-server', provider);
+		}
 	}
 
 	/**
@@ -27,8 +45,7 @@ export class ProviderService {
 	 */
 	static getProvider(id: ProviderId): IModelProvider | undefined {
 		this.ensureDefaults();
-		const resolvedId = id === 'google-gemini' ? 'gemini' : id;
-		return this.providers.get(resolvedId);
+		return this.providers.get(id) || this.providers.get(this.resolveId(id));
 	}
 
 	/**
@@ -36,7 +53,7 @@ export class ProviderService {
 	 */
 	static getAllProviders(): IModelProvider[] {
 		this.ensureDefaults();
-		return Array.from(this.providers.values());
+		return Array.from(new Set(this.providers.values()));
 	}
 
 	/**
@@ -49,6 +66,7 @@ export class ProviderService {
 		if (!provider) {
 			const fallback = new LlamaServerProvider();
 			this.providers.set(fallback.id, fallback);
+			this.providers.set('local-llama', fallback);
 			return fallback;
 		}
 		return provider;
@@ -61,7 +79,7 @@ export class ProviderService {
 	 */
 	static setActiveProvider(id: ProviderId): void {
 		this.ensureDefaults();
-		const resolvedId = id === 'google-gemini' ? 'gemini' : id;
+		const resolvedId = this.providers.has(id) ? id : this.resolveId(id);
 		if (!this.providers.has(resolvedId)) {
 			throw new Error(`Provider "${id}" is not registered`);
 		}
@@ -89,13 +107,15 @@ export class ProviderService {
 	 * Ensures default providers (llama-server and gemini) are registered and hydrated from storage.
 	 */
 	private static ensureDefaults(): void {
-		if (!this.providers.has('llama-server')) {
+		if (!this.providers.has('llama-server') && !this.providers.has('local-llama')) {
 			const defaultProvider = new LlamaServerProvider();
-			this.providers.set(defaultProvider.id, defaultProvider);
+			this.providers.set('llama-server', defaultProvider);
+			this.providers.set('local-llama', defaultProvider);
 		}
-		if (!this.providers.has('gemini')) {
-			const geminiProvider = new GeminiProvider();
-			this.providers.set(geminiProvider.id, geminiProvider);
+		if (!this.providers.has('gemini') && !this.providers.has('google-gemini')) {
+			const geminiProvider = new GeminiProvider({ id: 'gemini' });
+			this.providers.set('gemini', geminiProvider);
+			this.providers.set('google-gemini', geminiProvider);
 		}
 		if (!this.hydrated) {
 			this.hydrated = true;

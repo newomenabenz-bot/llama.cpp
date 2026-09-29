@@ -8,6 +8,20 @@
 
 import type { IModelProvider, ProviderId, ProviderMetadata } from './types';
 import type {
+	IWorkbenchProvider,
+	WorkbenchModel,
+	ProviderChatRequest,
+	ProviderChatChunk,
+	ToolDefinition
+} from './provider.types';
+import {
+	cleanJsonSchema,
+	toGeminiFunctionDeclarations,
+	fromGeminiFunctionCall,
+	toGeminiFunctionResponse,
+	WORKBENCH_CORE_TOOLS
+} from './provider.types';
+import type {
 	ApiChatCompletionToolCall,
 	ApiChatMessageContentPart,
 	ApiChatMessageData,
@@ -84,78 +98,21 @@ export interface FormattedGeminiPayload {
 	};
 }
 
-/**
- * Clean JSON schema parameters for Gemini function declaration compatibility.
- */
-export function cleanJsonSchema(schema: Record<string, unknown>): Record<string, unknown> {
-	if (!schema || typeof schema !== 'object') {
-		return { type: 'object', properties: {} };
-	}
-
-	const cleaned: Record<string, unknown> = {};
-
-	for (const [key, value] of Object.entries(schema)) {
-		// Strip schema meta-keys that Gemini rejects
-		if (key === '$schema' || key === '$id' || key === 'definitions' || key === '$defs') {
-			continue;
-		}
-
-		if (key === 'properties' && value && typeof value === 'object') {
-			const props: Record<string, unknown> = {};
-			for (const [pKey, pVal] of Object.entries(value as Record<string, unknown>)) {
-				props[pKey] = cleanJsonSchema(pVal as Record<string, unknown>);
-			}
-			cleaned.properties = props;
-		} else if (key === 'items' && value && typeof value === 'object') {
-			cleaned.items = cleanJsonSchema(value as Record<string, unknown>);
-		} else {
-			cleaned[key] = value;
-		}
-	}
-
-	if (!cleaned.type && cleaned.properties) {
-		cleaned.type = 'object';
-	}
-
-	// Filter required properties that do not exist in properties
-	if (Array.isArray(cleaned.required)) {
-		if (cleaned.properties && typeof cleaned.properties === 'object') {
-			const propKeys = new Set(Object.keys(cleaned.properties as Record<string, unknown>));
-			cleaned.required = (cleaned.required as unknown[]).filter(
-				(r): r is string => typeof r === 'string' && propKeys.has(r)
-			);
-		}
-		if ((cleaned.required as string[]).length === 0) {
-			delete cleaned.required;
-		}
-	}
-
-	return cleaned;
-}
+export {
+	cleanJsonSchema,
+	toGeminiFunctionDeclarations,
+	fromGeminiFunctionCall,
+	toGeminiFunctionResponse,
+	WORKBENCH_CORE_TOOLS
+};
 
 /**
  * Converts standard OpenAI / MCP tool definitions into Gemini functionDeclarations.
  */
 export function formatGeminiTools(
-	tools?: OpenAIToolDefinition[]
+	tools?: Array<ToolDefinition | OpenAIToolDefinition>
 ): Array<{ functionDeclarations: Array<Record<string, unknown>> }> | undefined {
-	if (!tools || !Array.isArray(tools) || tools.length === 0) {
-		return undefined;
-	}
-
-	const functionDeclarations = tools
-		.filter((t) => t.type === 'function' && t.function?.name)
-		.map((t) => ({
-			name: t.function.name,
-			description: t.function.description || '',
-			parameters: cleanJsonSchema(t.function.parameters)
-		}));
-
-	if (functionDeclarations.length === 0) {
-		return undefined;
-	}
-
-	return [{ functionDeclarations }];
+	return toGeminiFunctionDeclarations(tools);
 }
 
 /**
@@ -492,23 +449,26 @@ export async function verifyAndFetchGeminiModels(
 	}
 }
 
-export class GeminiProvider implements IModelProvider {
-	readonly id: ProviderId = 'gemini';
+export class GeminiProvider implements IModelProvider, IWorkbenchProvider {
+	readonly id: ProviderId;
+	readonly displayName: string = 'Google Gemini';
 	readonly name: string = 'Google Gemini';
 
-	readonly metadata: ProviderMetadata = {
-		id: 'gemini',
-		name: 'Google Gemini',
-		description: 'Google DeepMind Gemini Models via REST & SSE',
-		enabled: true,
-		isDefault: false
-	};
+	readonly metadata: ProviderMetadata;
 
 	private apiKey?: string;
 	private baseUrl: string = 'https://generativelanguage.googleapis.com';
 	private defaultModel: string = 'gemini-2.5-flash';
 
-	constructor(config: { apiKey?: string; baseUrl?: string; defaultModel?: string } = {}) {
+	constructor(config: { apiKey?: string; baseUrl?: string; defaultModel?: string; id?: ProviderId } = {}) {
+		this.id = config.id || 'google-gemini';
+		this.metadata = {
+			id: this.id,
+			name: 'Google Gemini',
+			description: 'Google DeepMind Gemini Models via REST & SSE',
+			enabled: true,
+			isDefault: false
+		};
 		if (config.apiKey) this.apiKey = config.apiKey;
 		if (config.baseUrl) this.baseUrl = config.baseUrl;
 		if (config.defaultModel) this.defaultModel = config.defaultModel;
@@ -583,6 +543,52 @@ export class GeminiProvider implements IModelProvider {
 		const key = this.getApiKey();
 		if (!key) return [];
 		return GeminiProvider.fetchAvailableModels(key, this.baseUrl, signal);
+	}
+
+	/**
+	 * Verifies the key and returns active models or structured error payload.
+	 */
+	async verifyAndFetchModels(apiKey?: string, signal?: AbortSignal): Promise<ModelDiscoveryResult> {
+		const key = apiKey || this.getApiKey();
+		if (!key) {
+			return {
+				success: false,
+				models: [],
+				error: { message: 'Gemini API key is not configured' }
+			};
+		}
+		return verifyAndFetchGeminiModels(key, this.baseUrl, signal);
+	}
+
+	/**
+	 * Fetches available models from Google Generative Language API.
+	 * Implements IWorkbenchProvider contract.
+	 */
+	async fetchModels(credentials?: Record<string, unknown> | string): Promise<Array<WorkbenchModel>> {
+		let key: string | undefined;
+		if (typeof credentials === 'string') {
+			key = credentials;
+		} else if (credentials && typeof credentials === 'object' && 'apiKey' in credentials) {
+			key = String((credentials as Record<string, unknown>).apiKey || '');
+		} else {
+			key = this.getApiKey();
+		}
+
+		if (!key) {
+			return [];
+		}
+
+		const discovery = await this.verifyAndFetchModels(key);
+		if (!discovery.success || !discovery.models) {
+			return [];
+		}
+
+		return discovery.models.map((m) => ({
+			id: m.id,
+			displayName: m.displayName || m.id,
+			description: m.description,
+			providerId: this.id
+		}));
 	}
 
 	/**
@@ -669,16 +675,108 @@ export class GeminiProvider implements IModelProvider {
 		};
 
 		if (isStreaming) {
-			return this.streamChat(url, headers, requestBody, options, signal);
+			return this.executeSseStream(url, headers, requestBody, options, signal);
 		} else {
 			return this.sendNonStreaming(url, headers, requestBody, options, signal);
 		}
 	}
 
 	/**
+	 * Streams chat completion chunks via an AsyncIterableIterator.
+	 * Implements IWorkbenchProvider contract.
+	 */
+	async *streamChat(request: ProviderChatRequest): AsyncIterableIterator<ProviderChatChunk> {
+		type ChunkQueueItem =
+			| { type: 'chunk'; data: ProviderChatChunk }
+			| { type: 'error'; error: Error }
+			| { type: 'done' };
+
+		const queue: ChunkQueueItem[] = [];
+		let notify: (() => void) | null = null;
+
+		const push = (item: ChunkQueueItem) => {
+			queue.push(item);
+			if (notify) {
+				const fn = notify;
+				notify = null;
+				fn();
+			}
+		};
+
+		// Convert ToolDefinition[] to OpenAIToolDefinition[] if provided
+		const tools: OpenAIToolDefinition[] | undefined = request.tools
+			? request.tools.map((t) =>
+					'function' in t
+						? (t as OpenAIToolDefinition)
+						: {
+								type: 'function' as const,
+								function: {
+									name: t.name,
+									description: t.description,
+									parameters: t.parameters as unknown as Record<string, unknown>
+								}
+							}
+				)
+			: undefined;
+
+		const options: SettingsChatServiceOptions = {
+			...request.options,
+			model: request.model || this.defaultModel,
+			temperature: request.temperature,
+			max_tokens: request.maxTokens,
+			tools,
+			stream: true,
+			onChunk: (text: string) => {
+				push({ type: 'chunk', data: { content: text } });
+			},
+			onReasoningChunk: (chunk: string) => {
+				push({ type: 'chunk', data: { reasoning: chunk } });
+			},
+			onToolCallChunk: (serializedCalls: string) => {
+				try {
+					const parsed = JSON.parse(serializedCalls);
+					if (Array.isArray(parsed)) {
+						push({ type: 'chunk', data: { toolCalls: parsed } });
+					}
+				} catch {
+					// ignore json parse error
+				}
+			},
+			onComplete: async (_finalContent?: string, _reasoningContent?: string, timings?: ChatMessageTimings) => {
+				push({ type: 'chunk', data: { done: true, timings } });
+				push({ type: 'done' });
+			},
+			onError: (err: Error) => {
+				push({ type: 'error', error: err });
+			}
+		};
+
+		this.sendMessage(request.messages, options, request.conversationId, request.signal).catch((err) => {
+			push({ type: 'error', error: err instanceof Error ? err : new Error(String(err)) });
+		});
+
+		while (true) {
+			while (queue.length > 0) {
+				const item = queue.shift()!;
+				if (item.type === 'chunk') {
+					yield item.data;
+				} else if (item.type === 'error') {
+					throw item.error;
+				} else if (item.type === 'done') {
+					return;
+				}
+			}
+
+			await new Promise<void>((resolve) => {
+				notify = resolve;
+			});
+		}
+	}
+
+	/**
 	 * Executes streaming chat completion and processes SSE stream.
 	 */
-	async streamChat(
+	private async executeSseStream(
 		url: string,
 		headers: Record<string, string>,
 		body: Record<string, unknown>,

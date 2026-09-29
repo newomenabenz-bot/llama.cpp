@@ -2,10 +2,8 @@ import type { DatabaseMessage, DatabaseMessageExtra } from '$lib/types/database'
 import type { ApiChatMessageData } from '$lib/types/api';
 import type { SettingsChatServiceOptions } from '$lib/types/settings';
 
-/**
- * Supported provider identifiers in the OMENA workbench architecture.
- */
-export type ProviderId = 'llama-server' | 'gemini' | string;
+export * from './provider.types';
+import type { ProviderId } from './provider.types';
 
 /**
  * Universal interface for model providers.
