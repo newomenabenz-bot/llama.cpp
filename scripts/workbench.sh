@@ -40,6 +40,7 @@ WORKBENCH_MODEL_PATH="${WORKBENCH_MODEL_PATH:-}"
 WORKBENCH_CTX_SIZE="${WORKBENCH_CTX_SIZE:-4096}"
 WORKBENCH_N_THREADS="${WORKBENCH_N_THREADS:-4}"
 WORKBENCH_N_GPU_LAYERS="${WORKBENCH_N_GPU_LAYERS:-0}"
+WORKBENCH_PUBLIC_DIR="$(resolve_path "${WORKBENCH_PUBLIC_DIR:-$APP_ROOT/public}")"
 WORKBENCH_DATA_DIR="$(resolve_path "${WORKBENCH_DATA_DIR:-$APP_ROOT/data}")"
 WORKBENCH_WORKSPACE_DIR="$(resolve_path "${WORKBENCH_WORKSPACE_DIR:-$APP_ROOT/data/workspace}")"
 WORKBENCH_LOG_FILE="$(resolve_path "${WORKBENCH_LOG_FILE:-$APP_ROOT/data/logs/workbench.log}")"
@@ -47,6 +48,22 @@ WORKBENCH_PID_FILE="$(resolve_path "${WORKBENCH_PID_FILE:-$APP_ROOT/data/workben
 WORKBENCH_API_KEY="${WORKBENCH_API_KEY:-}"
 
 SERVER_BIN="$APP_ROOT/bin/llama-server"
+
+check_port_in_use() {
+	local port="$1"
+	if command -v ss >/dev/null 2>&1; then
+		ss -tuln 2>/dev/null | grep -qE "[:.]${port}\b" && return 0
+	elif command -v netstat >/dev/null 2>&1; then
+		netstat -tuln 2>/dev/null | grep -qE "[:.]${port}\b" && return 0
+	elif command -v lsof >/dev/null 2>&1; then
+		lsof -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1 && return 0
+	elif (exec 3<>/dev/tcp/127.0.0.1/"$port") 2>/dev/null; then
+		exec 3<&-
+		exec 3>&-
+		return 0
+	fi
+	return 1
+}
 
 ensure_directories() {
 	mkdir -p "$WORKBENCH_DATA_DIR" \
@@ -76,6 +93,12 @@ do_start() {
 		exit 0
 	fi
 
+	# Pre-flight Port Check
+	if check_port_in_use "$WORKBENCH_PORT"; then
+		echo "[ERROR] Port $WORKBENCH_PORT is already in use by another process." >&2
+		exit 1
+	fi
+
 	if [ ! -x "$SERVER_BIN" ]; then
 		echo "[ERROR] Binary not found or not executable: $SERVER_BIN"
 		exit 1
@@ -95,8 +118,9 @@ do_start() {
 		)
 	fi
 
-	if [ -n "$WORKBENCH_WORKSPACE_DIR" ]; then
-		args+=(--path "$WORKBENCH_WORKSPACE_DIR")
+	# Static Web UI document root (replaces conflicting workspace --path usage)
+	if [ -n "$WORKBENCH_PUBLIC_DIR" ] && [ -d "$WORKBENCH_PUBLIC_DIR" ]; then
+		args+=(--path "$WORKBENCH_PUBLIC_DIR")
 	fi
 
 	if [ -n "$WORKBENCH_API_KEY" ]; then
@@ -118,8 +142,7 @@ do_start() {
 		fi
 		if ! kill -0 "$pid" 2>/dev/null; then
 			echo ""
-			echo "[ERROR] Server process $pid terminated prematurely."
-			echo "--- Tail of $WORKBENCH_LOG_FILE ---"
+			echo "[ERROR] llama-server (PID: $pid) terminated unexpectedly."
 			tail -n 25 "$WORKBENCH_LOG_FILE" || true
 			rm -f "$WORKBENCH_PID_FILE"
 			exit 1

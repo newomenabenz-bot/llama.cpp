@@ -143,6 +143,7 @@ RELEASE_ROOT="$REPO_ROOT/dist-release/llama-workbench"
 rm -rf "$RELEASE_ROOT"
 mkdir -p "$RELEASE_ROOT/bin"
 mkdir -p "$RELEASE_ROOT/scripts"
+mkdir -p "$RELEASE_ROOT/public"
 mkdir -p "$RELEASE_ROOT/data/models"
 mkdir -p "$RELEASE_ROOT/data/workspace"
 mkdir -p "$RELEASE_ROOT/data/logs"
@@ -154,6 +155,16 @@ chmod +x "$RELEASE_ROOT/bin/llama-server"
 # Copy supervisor
 cp "$REPO_ROOT/scripts/workbench.sh" "$RELEASE_ROOT/scripts/workbench.sh"
 chmod +x "$RELEASE_ROOT/scripts/workbench.sh"
+
+# Copy static Web UI / Workbench assets to public/
+echo "  Copying static Web UI / Workbench assets to public/..."
+cp -r "$DIST_DIR/"* "$RELEASE_ROOT/public/"
+
+if [ ! -f "$RELEASE_ROOT/public/index.html" ]; then
+	echo "[ERROR] Failed to assemble public directory: missing index.html" >&2
+	exit 1
+fi
+echo "  Public Web UI assets verified: $(find "$RELEASE_ROOT/public" -type f | wc -l) files copied."
 
 # Copy environment template
 cp "$REPO_ROOT/workbench.env.example" "$RELEASE_ROOT/workbench.env.example"
@@ -187,6 +198,7 @@ embedding the full Web UI and Autonomous Agent IDE directly inside the high-perf
 
 ## Directory Structure
 - `bin/llama-server`: Native C++ binary with embedded UI assets.
+- `public/`: Compiled Web UI static assets document root (HTML, JS, CSS, PWA).
 - `scripts/workbench.sh`: Runtime process supervisor (start, stop, restart, status, health, logs).
 - `data/models/`: Target folder for local GGUF model weights.
 - `data/workspace/`: Sandboxed filesystem workspace for autonomous agent tool executions.

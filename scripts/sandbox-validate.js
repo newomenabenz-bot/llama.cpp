@@ -88,12 +88,22 @@ if (fs.existsSync(RELEASE_PKG)) {
 
 fs.mkdirSync(path.join(RELEASE_PKG, 'bin'), { recursive: true });
 fs.mkdirSync(path.join(RELEASE_PKG, 'scripts'), { recursive: true });
+fs.mkdirSync(path.join(RELEASE_PKG, 'public'), { recursive: true });
 fs.mkdirSync(path.join(RELEASE_PKG, 'data', 'models'), { recursive: true });
 fs.mkdirSync(path.join(RELEASE_PKG, 'data', 'workspace'), { recursive: true });
 fs.mkdirSync(path.join(RELEASE_PKG, 'data', 'logs'), { recursive: true });
 fs.writeFileSync(path.join(RELEASE_PKG, 'data', 'models', '.gitkeep'), '');
 fs.writeFileSync(path.join(RELEASE_PKG, 'data', 'workspace', '.gitkeep'), '');
 fs.writeFileSync(path.join(RELEASE_PKG, 'data', 'logs', '.gitkeep'), '');
+
+// Copy compiled Web UI assets to public/ document root
+console.log('  Copying static Web UI assets to public/...');
+fs.cpSync(UI_DIST, path.join(RELEASE_PKG, 'public'), { recursive: true });
+
+if (!fs.existsSync(path.join(RELEASE_PKG, 'public', 'index.html'))) {
+  throw new Error('Failed to assemble public directory: missing index.html');
+}
+console.log('  ✓ Public Web UI assets assembled and verified in public/index.html');
 
 // Copy runtime supervisor
 fs.copyFileSync(
@@ -135,6 +145,7 @@ embedding the full Web UI and Autonomous Agent IDE directly inside the high-perf
 
 ## Directory Structure
 - \`bin/llama-server\`: Native server binary with embedded UI assets.
+- \`public/\`: Compiled Web UI static assets document root (HTML, JS, CSS, PWA).
 - \`scripts/workbench.sh\`: Runtime process supervisor (start, stop, restart, status, health, logs).
 - \`workbench.env.example\`: Environment configuration template.
 - \`data/models/\`: Target directory for local GGUF model weights.
@@ -149,8 +160,8 @@ embedding the full Web UI and Autonomous Agent IDE directly inside the high-perf
 fs.writeFileSync(path.join(RELEASE_PKG, 'README.md'), readmeContent, 'utf8');
 
 // Create standalone server runner inside bin/llama-server
-// Handles arguments: --host, --port, --path, --ctx-size, etc.
-// Provides /health and serves static UI
+// Handles arguments: --host, --port, --path (public document root), --ctx-size, etc.
+// Provides /health and serves static UI from mounted --path
 const serverScriptContent = `#!/usr/bin/env node
 import http from 'node:http';
 import fs from 'node:fs';
@@ -159,12 +170,12 @@ import path from 'node:path';
 const args = process.argv.slice(2);
 let host = '127.0.0.1';
 let port = 8080;
-let staticDir = path.resolve(import.meta.dirname, '..', '..', '..', 'tools', 'ui', 'dist');
+let staticDir = path.resolve(import.meta.dirname, '..', 'public');
 
 for (let i = 0; i < args.length; i++) {
   if (args[i] === '--host' && args[i + 1]) host = args[++i];
   if (args[i] === '--port' && args[i + 1]) port = parseInt(args[++i], 10);
-  if (args[i] === '--path' && args[i + 1]) staticDir = args[++i];
+  if (args[i] === '--path' && args[i + 1]) staticDir = path.resolve(args[++i]);
 }
 
 const mimeTypes = {
@@ -310,9 +321,15 @@ execSync(`tar -xzf "${ARCHIVE_PATH}" -C "${SANDBOX_DIR}"`, {
 if (!fs.existsSync(EXTRACTED_DIR)) {
   throw new Error(`Extraction failed: expected ${EXTRACTED_DIR} does not exist`);
 }
+
+const extractedPublicIndex = path.join(EXTRACTED_DIR, 'public', 'index.html');
+if (!fs.existsSync(extractedPublicIndex)) {
+  throw new Error(`Extraction failed: missing public/index.html at ${extractedPublicIndex}`);
+}
+
 console.log(`  ✓ Extraction verified. Sandbox contains:`);
 fs.readdirSync(EXTRACTED_DIR).forEach((f) => console.log(`    ├── ${f}`));
-console.log();
+console.log(`  ✓ Extracted Web UI static document root confirmed at public/index.html\n`);
 
 // ------------------------------------------------------------------------------
 // STEP 6: Runtime Lifecycle Self-Test in Sandbox
@@ -324,9 +341,10 @@ const sandboxEnvFile = path.join(EXTRACTED_DIR, 'workbench.env');
 fs.copyFileSync(path.join(EXTRACTED_DIR, 'workbench.env.example'), sandboxEnvFile);
 
 const serverBin = path.join(EXTRACTED_DIR, 'bin', 'llama-server');
+const extractedPublicDir = path.join(EXTRACTED_DIR, 'public');
 const serverProc = spawn(
   process.execPath,
-  [serverBin, '--host', TEST_HOST, '--port', String(TEST_PORT), '--path', UI_DIST],
+  [serverBin, '--host', TEST_HOST, '--port', String(TEST_PORT), '--path', extractedPublicDir],
   {
     cwd: EXTRACTED_DIR,
     stdio: ['ignore', 'pipe', 'pipe'],
