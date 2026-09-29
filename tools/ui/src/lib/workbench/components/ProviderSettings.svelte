@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import {
 		AlertTriangle,
 		Check,
@@ -29,16 +30,22 @@
 		WorkbenchSettingsService.getActiveProviderId()
 	);
 	let apiKey = $state<string>(WorkbenchSettingsService.getGeminiApiKey());
-	let selectedModel = $state<string>(WorkbenchSettingsService.getGeminiModel());
+	let selectedModel = $state<string>(
+		WorkbenchSettingsService.getSelectedGeminiModel() || WorkbenchSettingsService.getGeminiModel()
+	);
 	let executionMode = $state<ExecutionMode>(WorkbenchSettingsService.getExecutionMode());
 	let workspaceRoot = $state<string>(WorkbenchSettingsService.getWorkspaceRoot());
 	let showApiKey = $state<boolean>(false);
 	let saveNotice = $state<boolean>(false);
 
-	const DISCOVERED_MODELS_CACHE_KEY = 'workbench_gemini_discovered_models';
-	let availableModels = $state<Array<{ id: string; displayName: string; description?: string }>>([]);
+	const initialCachedModels = WorkbenchSettingsService.getCachedGeminiModels();
+	let availableModels = $state<Array<{ id: string; displayName: string; description?: string }>>(
+		initialCachedModels.length > 0 ? initialCachedModels : []
+	);
 	let isChecking = $state<boolean>(false);
-	let connectionStatus = $state<'idle' | 'success' | 'error'>('idle');
+	let connectionStatus = $state<'idle' | 'success' | 'error'>(
+		initialCachedModels.length > 0 ? 'success' : 'idle'
+	);
 	let apiErrorMessage = $state<string | null>(null);
 	let apiErrorCode = $state<string | null>(null);
 	let customModelInput = $state<string>('');
@@ -53,6 +60,26 @@
 	});
 
 	let isConfigured = $derived(Boolean(apiKey.trim()));
+
+	onMount(() => {
+		// 1. Read getCachedGeminiModels() and populate availableModels immediately
+		const cached = WorkbenchSettingsService.getCachedGeminiModels();
+		if (cached && cached.length > 0) {
+			availableModels = cached;
+			connectionStatus = 'success';
+		}
+
+		// 2. Read getSelectedGeminiModel() and set dropdown selection
+		const savedModel = WorkbenchSettingsService.getSelectedGeminiModel();
+		if (savedModel) {
+			selectedModel = savedModel;
+		}
+
+		// 3. If an API key is present but no cache exists, run verification automatically in the background
+		if (apiKey.trim() && (!cached || cached.length === 0)) {
+			void handleCheckConnection();
+		}
+	});
 
 	async function handleCheckConnection() {
 		const key = apiKey.trim();
@@ -76,23 +103,19 @@
 				apiErrorMessage = null;
 				apiErrorCode = null;
 
-				// Auto-persistence: persist API key and active model selection in localStorage
+				// 1. Save discovered models array to cache
+				WorkbenchSettingsService.saveCachedGeminiModels(result.models);
 				WorkbenchSettingsService.setGeminiApiKey(key);
-				if (typeof localStorage !== 'undefined') {
-					try {
-						localStorage.setItem(DISCOVERED_MODELS_CACHE_KEY, JSON.stringify(result.models));
-					} catch {
-						// storage quota
-					}
-				}
 
+				// 2. If no model previously selected, default to first viable model
 				if (result.models.length > 0 && !isCustomModelMode) {
-					const hasCurrent = result.models.some((m) => m.id === selectedModel);
+					const hasCurrent = selectedModel && result.models.some((m) => m.id === selectedModel);
 					if (!hasCurrent) {
 						const flashModel = result.models.find((m) => m.id.includes('flash')) || result.models[0];
 						selectedModel = flashModel.id;
-						WorkbenchSettingsService.setGeminiModel(selectedModel);
 					}
+					WorkbenchSettingsService.saveSelectedGeminiModel(selectedModel);
+					WorkbenchSettingsService.setGeminiModel(selectedModel);
 				}
 				showSaveFeedback();
 			} else {
@@ -119,11 +142,14 @@
 
 	function handleApiKeyInput(e: Event) {
 		const target = e.target as HTMLInputElement;
+		const oldKey = apiKey;
 		apiKey = target.value;
 		WorkbenchSettingsService.setGeminiApiKey(apiKey);
-		connectionStatus = 'idle';
-		apiErrorMessage = null;
-		apiErrorCode = null;
+		if (apiKey !== oldKey) {
+			connectionStatus = 'idle';
+			apiErrorMessage = null;
+			apiErrorCode = null;
+		}
 		showSaveFeedback();
 	}
 
@@ -138,6 +164,7 @@
 		} else {
 			isCustomModelMode = false;
 			selectedModel = val;
+			WorkbenchSettingsService.saveSelectedGeminiModel(selectedModel);
 			WorkbenchSettingsService.setGeminiModel(selectedModel);
 			showSaveFeedback();
 		}
@@ -148,9 +175,20 @@
 		customModelInput = target.value.trim();
 		if (customModelInput) {
 			selectedModel = customModelInput;
+			WorkbenchSettingsService.saveSelectedGeminiModel(selectedModel);
 			WorkbenchSettingsService.setGeminiModel(selectedModel);
 			showSaveFeedback();
 		}
+	}
+
+	function handleSaveSettings() {
+		const key = apiKey.trim();
+		WorkbenchSettingsService.setGeminiApiKey(key);
+		if (selectedModel) {
+			WorkbenchSettingsService.saveSelectedGeminiModel(selectedModel);
+			WorkbenchSettingsService.setGeminiModel(selectedModel);
+		}
+		showSaveFeedback();
 	}
 
 	function selectExecutionMode(mode: ExecutionMode) {
@@ -323,7 +361,7 @@
 					</div>
 
 					<!-- Real-Time Status / Error Banners -->
-					{#if connectionStatus === 'success'}
+					{#if connectionStatus === 'success' && availableModels.length > 0}
 						<div
 							class="mt-2.5 p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 text-xs flex items-center justify-between gap-2"
 							data-testid="gemini-connection-success"
@@ -331,14 +369,14 @@
 							<div class="flex items-center gap-2">
 								<Check class="h-4 w-4 shrink-0 text-emerald-500" />
 								<span class="font-medium">
-									✓ Connected successfully. Discovered {availableModels.length} active models.
+									✓ Discovered {availableModels.length} active models.
 								</span>
 							</div>
 							<Badge
 								variant="outline"
 								class="border-emerald-500/40 text-[10px] text-emerald-600 dark:text-emerald-400 bg-emerald-500/10"
 							>
-								{availableModels.length} Models Verified
+								{availableModels.length} Live Models Verified
 							</Badge>
 						</div>
 					{:else if connectionStatus === 'error'}
@@ -370,7 +408,7 @@
 							<Sparkles class="h-3.5 w-3.5 text-amber-500" />
 							Default Gemini Model
 						</label>
-						{#if connectionStatus === 'success'}
+						{#if connectionStatus === 'success' && availableModels.length > 0}
 							<Badge variant="outline" class="text-[10px] border-emerald-500/40 text-emerald-600 dark:text-emerald-400">
 								{availableModels.length} Live Models
 							</Badge>
@@ -424,6 +462,26 @@
 								Directly specify any cutting-edge or experimental Google model identifier.
 							</p>
 						</div>
+					{/if}
+				</div>
+
+				<!-- Explicit Save Settings Action -->
+				<div class="pt-3 flex items-center justify-between border-t border-border/30">
+					<Button
+						type="button"
+						variant="default"
+						size="sm"
+						class="h-8 px-3 text-xs font-medium flex items-center gap-1.5"
+						onclick={handleSaveSettings}
+					>
+						<Check class="h-3.5 w-3.5" />
+						<span>Save Settings</span>
+					</Button>
+					{#if saveNotice}
+						<span class="text-xs text-emerald-600 dark:text-emerald-400 flex items-center gap-1 font-medium">
+							<Check class="h-3.5 w-3.5" />
+							Settings saved
+						</span>
 					{/if}
 				</div>
 			</div>

@@ -25,8 +25,11 @@
 		serverStore,
 		settingsStore
 	} from '$lib/stores';
+	import { Sparkles } from '@lucide/svelte';
 	import WorkbenchLayout from '$lib/workbench/components/WorkbenchLayout.svelte';
 	import WorkbenchModeToggle from '$lib/workbench/components/WorkbenchModeToggle.svelte';
+	import { modelsStore } from '$lib/stores/models/index.svelte';
+	import { WorkbenchSettingsService } from '$lib/workbench/settings/workbench-settings.service';
 	import { workbenchShellStore } from '$lib/workbench/shell/shell.svelte';
 	import { parseFilesToMessageExtras } from '$lib/utils/browser-only';
 	import { onDestroy, onMount, tick } from 'svelte';
@@ -65,6 +68,33 @@
 	const autoScroll = createAutoScrollController();
 	const scroll = useChatScreenScroll(autoScroll);
 	const activeModel = useChatScreenActiveModel();
+
+	let settingsRevision = $state(0);
+
+	$effect(() => {
+		const unsubscribe = WorkbenchSettingsService.subscribe(() => {
+			settingsRevision += 1;
+		});
+		return unsubscribe;
+	});
+
+	let activeProvider = $derived.by(() => {
+		void settingsRevision;
+		return WorkbenchSettingsService.getActiveProviderId();
+	});
+
+	let activeModelDisplay = $derived.by(() => {
+		void settingsRevision;
+		if (activeProvider === 'gemini') {
+			return (
+				modelsStore.selectedModelName ||
+				WorkbenchSettingsService.getSelectedGeminiModel() ||
+				WorkbenchSettingsService.getGeminiModel() ||
+				'gemini-2.5-flash'
+			);
+		}
+		return modelsStore.selectedModelName || activeModel.activeModelId || '';
+	});
 	const fileUpload = useChatScreenFileUpload({
 		activeModelId: () => activeModel.activeModelId,
 		capabilities: () => ({
@@ -375,6 +405,16 @@
 {:else}
 	{#if !isWorkbenchMode}
 		<div class="fixed md:absolute top-2.5 right-4 z-30 flex items-center gap-2">
+			{#if activeModelDisplay}
+				<div
+					class="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border border-border/60 bg-background/80 backdrop-blur shadow-sm text-foreground"
+					title="Active Model: {activeModelDisplay}"
+					data-testid="chat-screen-active-model-pill"
+				>
+					<Sparkles class="size-3 text-amber-500 shrink-0" />
+					<span class="text-xs font-semibold max-w-44 truncate">{activeModelDisplay}</span>
+				</div>
+			{/if}
 			<WorkbenchModeToggle />
 		</div>
 	{/if}

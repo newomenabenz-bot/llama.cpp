@@ -2,6 +2,7 @@
 	import { ModelsSelectorDropdown, ModelsSelectorSheet } from '$lib/components/app';
 	import { conversationsStore, deviceStore, modelsStore, serverStore } from '$lib/stores';
 	import { getConversationModel } from '$lib/utils';
+	import { WorkbenchSettingsService } from '$lib/workbench/settings/workbench-settings.service';
 
 	interface Props {
 		disabled?: boolean;
@@ -27,8 +28,9 @@
 		useGlobalSelection = false
 	}: Props = $props();
 
-	let isRouter = $derived(serverStore.isRouterMode);
-	let isOffline = $derived(!!serverStore.error);
+	let isGemini = $derived(WorkbenchSettingsService.getActiveProviderId() === 'gemini');
+	let isRouter = $derived(serverStore.isRouterMode || isGemini);
+	let isOffline = $derived(!isGemini && !!serverStore.error);
 
 	let conversationModel = $derived(
 		getConversationModel(conversationsStore.activeMessages as DatabaseMessage[])
@@ -37,6 +39,15 @@
 	let lastSyncedConversationModel: string | null = null;
 
 	let selectorModel = $derived.by(() => {
+		if (isGemini) {
+			return (
+				modelsStore.selectedModelName ||
+				WorkbenchSettingsService.getSelectedGeminiModel() ||
+				WorkbenchSettingsService.getGeminiModel() ||
+				null
+			);
+		}
+
 		const storeModel = modelsStore.selectedModelName;
 
 		if (storeModel && storeModel !== conversationModel) {
@@ -112,11 +123,21 @@
 	});
 
 	$effect(() => {
-		hasModelSelected = !isRouter || !!conversationModel || !!modelsStore.selectedModelId;
+		if (isGemini) {
+			hasModelSelected = Boolean(
+				modelsStore.selectedModelName ||
+				WorkbenchSettingsService.getSelectedGeminiModel() ||
+				WorkbenchSettingsService.getGeminiModel()
+			);
+		} else {
+			hasModelSelected = !isRouter || !!conversationModel || !!modelsStore.selectedModelId;
+		}
 	});
 
 	$effect(() => {
-		if (!isRouter) {
+		if (isGemini) {
+			isSelectedModelInCache = true;
+		} else if (!isRouter) {
 			isSelectedModelInCache = true;
 		} else if (conversationModel) {
 			isSelectedModelInCache = modelsStore.models.some(

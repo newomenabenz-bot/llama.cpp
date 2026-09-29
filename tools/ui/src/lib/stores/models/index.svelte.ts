@@ -16,6 +16,7 @@ import { type ModelPropsHost, ModelPropsManager } from '$lib/stores/models/props
 import { type ModelStatusHost, ModelStatusManager } from '$lib/stores/models/status.svelte';
 import { serverStore } from '$lib/stores/server.svelte';
 import { getConversationModel } from '$lib/utils/conversation-utils';
+import { WorkbenchSettingsService } from '$lib/workbench/settings/workbench-settings.service';
 import { SvelteSet } from 'svelte/reactivity';
 import { toast } from 'svelte-sonner';
 
@@ -46,6 +47,15 @@ class ModelsStore implements ModelPropsHost, ModelStatusHost {
 	 * served model, from the models list or the server props as a fallback.
 	 */
 	get activeModelId(): string | null {
+		if (WorkbenchSettingsService.getActiveProviderId() === 'gemini') {
+			return (
+				this.selectedModelName ||
+				WorkbenchSettingsService.getSelectedGeminiModel() ||
+				WorkbenchSettingsService.getGeminiModel() ||
+				null
+			);
+		}
+
 		if (!serverStore.isRouterMode) {
 			return this.models.length > 0 ? this.models[0].model : this.singleModelName;
 		}
@@ -99,6 +109,15 @@ class ModelsStore implements ModelPropsHost, ModelStatusHost {
 	 * In ROUTER mode, returns null (model is per-conversation).
 	 */
 	get singleModelName(): string | null {
+		if (WorkbenchSettingsService.getActiveProviderId() === 'gemini') {
+			return (
+				this.selectedModelName ||
+				WorkbenchSettingsService.getSelectedGeminiModel() ||
+				WorkbenchSettingsService.getGeminiModel() ||
+				'gemini-2.5-flash'
+			);
+		}
+
 		if (serverStore.isRouterMode) return null;
 
 		const props = serverStore.props;
@@ -271,12 +290,66 @@ class ModelsStore implements ModelPropsHost, ModelStatusHost {
 		);
 	}
 
+	/**
+	 * Injects discovered Gemini models into modelsStore and synchronizes active selection.
+	 */
+	syncGeminiModels(
+		cachedModels?: Array<{ id: string; displayName: string }>,
+		selectedModel?: string
+	): void {
+		const modelsToSync = cachedModels || WorkbenchSettingsService.getCachedGeminiModels();
+		if (!modelsToSync || modelsToSync.length === 0) return;
+
+		this.models = modelsToSync.map((item) => {
+			const cleanId = item.id.replace(/^models\//, '');
+			const displayName = item.displayName || cleanId;
+			return {
+				aliases: [cleanId, item.id],
+				capabilities: ['chat', 'tools'],
+				description: displayName,
+				details: cleanId,
+				id: cleanId,
+				meta: null,
+				modalities: ['text'],
+				model: cleanId,
+				name: displayName,
+				parsedId: {
+					name: displayName,
+					tags: []
+				},
+				tags: ['gemini', 'cloud']
+			};
+		});
+
+		const currentSelected =
+			selectedModel ||
+			WorkbenchSettingsService.getSelectedGeminiModel() ||
+			WorkbenchSettingsService.getGeminiModel();
+
+		const matching = this.models.find(
+			(m) =>
+				m.model === currentSelected ||
+				m.id === currentSelected ||
+				m.aliases?.includes(currentSelected)
+		);
+
+		if (matching) {
+			this.selectedModelId = matching.id;
+			this.selectedModelName = matching.model;
+		} else if (this.models.length > 0) {
+			this.selectedModelId = this.models[0].id;
+			this.selectedModelName = this.models[0].model;
+		}
+	}
+
 	async selectModelById(modelId: string): Promise<void> {
 		if (!modelId || this.updating) return;
 
 		if (this.selectedModelId === modelId) return;
 
-		const option = this.models.find((model) => model.id === modelId);
+		const option = this.models.find(
+			(model) => model.id === modelId || model.model === modelId || model.aliases?.includes(modelId)
+		);
 
 		if (!option) throw new Error('Selected model is not available');
 
@@ -286,6 +359,10 @@ class ModelsStore implements ModelPropsHost, ModelStatusHost {
 		try {
 			this.selectedModelId = option.id;
 			this.selectedModelName = option.model;
+			if (WorkbenchSettingsService.getActiveProviderId() === 'gemini') {
+				WorkbenchSettingsService.saveSelectedGeminiModel(option.model);
+				WorkbenchSettingsService.setGeminiModel(option.model);
+			}
 		} finally {
 			this.updating = false;
 		}
@@ -295,11 +372,17 @@ class ModelsStore implements ModelPropsHost, ModelStatusHost {
 	 * Select a model by its model name (used for syncing with conversation model).
 	 */
 	selectModelByName(modelName: string): void {
-		const option = this.models.find((model) => model.model === modelName);
+		const option = this.models.find(
+			(model) => model.model === modelName || model.id === modelName || model.aliases?.includes(modelName)
+		);
 
 		if (option) {
 			this.selectedModelId = option.id;
 			this.selectedModelName = option.model;
+			if (WorkbenchSettingsService.getActiveProviderId() === 'gemini') {
+				WorkbenchSettingsService.saveSelectedGeminiModel(option.model);
+				WorkbenchSettingsService.setGeminiModel(option.model);
+			}
 		}
 	}
 
@@ -415,6 +498,14 @@ class ModelsStore implements ModelPropsHost, ModelStatusHost {
 		this.error = null;
 
 		try {
+			if (WorkbenchSettingsService.getActiveProviderId() === 'gemini') {
+				const cached = WorkbenchSettingsService.getCachedGeminiModels();
+				if (cached && cached.length > 0) {
+					this.syncGeminiModels(cached);
+					return;
+				}
+			}
+
 			if (!serverStore.props) {
 				await serverStore.fetch();
 			}
@@ -449,3 +540,26 @@ class ModelsStore implements ModelPropsHost, ModelStatusHost {
 }
 
 export const modelsStore = new ModelsStore();
+
+// Synchronize with WorkbenchSettingsService for Gemini models
+if (typeof window !== 'undefined') {
+	try {
+		if (WorkbenchSettingsService.getActiveProviderId() === 'gemini') {
+			const cached = WorkbenchSettingsService.getCachedGeminiModels();
+			if (cached && cached.length > 0) {
+				modelsStore.syncGeminiModels(cached);
+			}
+		}
+
+		WorkbenchSettingsService.subscribe((settings) => {
+			if (settings.activeProviderId === 'gemini') {
+				const cached = WorkbenchSettingsService.getCachedGeminiModels();
+				if (cached && cached.length > 0) {
+					modelsStore.syncGeminiModels(cached, settings.geminiModel);
+				}
+			}
+		});
+	} catch {
+		// Ignore during SSR or initial setup
+	}
+}

@@ -2,6 +2,7 @@ import { filterModelOptions, groupModelOptions } from '$lib/components/app/model
 import { CHAT_INPUT_FOCUS_SELECTOR } from '$lib/constants';
 import { modelsStore, serverStore } from '$lib/stores';
 import type { ModelOption } from '$lib/types/models';
+import { WorkbenchSettingsService } from '$lib/workbench/settings/workbench-settings.service';
 import { onMount } from 'svelte';
 
 export interface UseModelsSelectorOptions {
@@ -55,21 +56,23 @@ export function useModelsSelector(opts: UseModelsSelectorOptions): UseModelsSele
 	const loading = $derived(modelsStore.loading);
 	const updating = $derived(modelsStore.updating);
 	const activeId = $derived(modelsStore.selectedModelId);
-	const isRouter = $derived(serverStore.isRouterMode);
+	const isGemini = $derived(WorkbenchSettingsService.getActiveProviderId() === 'gemini');
+	const isRouter = $derived(serverStore.isRouterMode || isGemini);
 	const serverModel = $derived(modelsStore.singleModelName);
 	const currentModel = $derived(opts.currentModel());
 	const onModelChange = $derived(opts.onModelChange?.());
 	const isHighlightedCurrentModelActive = $derived.by(() => {
 		if (!isRouter || !currentModel) return false;
 
-		const currentOption = options.find((option) => option.model === currentModel);
+		const currentOption = options.find((option) => option.model === currentModel || option.id === currentModel);
 
 		return currentOption ? currentOption.id === activeId : false;
 	});
 	const isCurrentModelInCache = $derived.by(() => {
+		if (isGemini) return true;
 		if (!isRouter || !currentModel) return true;
 
-		return options.some((option) => option.model === currentModel);
+		return options.some((option) => option.model === currentModel || option.id === currentModel);
 	});
 
 	let isLoadingModel = $state(false);
@@ -101,7 +104,7 @@ export function useModelsSelector(opts: UseModelsSelectorOptions): UseModelsSele
 		if (isRouter) {
 			searchTerm = '';
 
-			if (open) {
+			if (open && !isGemini) {
 				modelsStore.fetchRouterModels().then(() => {
 					modelsStore.props.fetchModalitiesForLoadedModels();
 				});
@@ -114,7 +117,7 @@ export function useModelsSelector(opts: UseModelsSelectorOptions): UseModelsSele
 	}
 
 	async function handleSelect(modelId: string) {
-		const option = options.find((opt) => opt.id === modelId);
+		const option = options.find((opt) => opt.id === modelId || opt.model === modelId);
 
 		if (!option) return;
 
@@ -130,6 +133,11 @@ export function useModelsSelector(opts: UseModelsSelectorOptions): UseModelsSele
 			await modelsStore.selectModelById(option.id);
 		}
 
+		if (isGemini) {
+			WorkbenchSettingsService.saveSelectedGeminiModel(option.model);
+			WorkbenchSettingsService.setGeminiModel(option.model);
+		}
+
 		if (shouldCloseMenu) {
 			handleOpenChange(false);
 
@@ -140,7 +148,7 @@ export function useModelsSelector(opts: UseModelsSelectorOptions): UseModelsSele
 			});
 		}
 
-		if (!onModelChange && isRouter && !modelsStore.isModelLoaded(option.model)) {
+		if (!onModelChange && isRouter && !isGemini && !modelsStore.isModelLoaded(option.model)) {
 			isLoadingModel = true;
 
 			modelsStore.status
@@ -151,6 +159,25 @@ export function useModelsSelector(opts: UseModelsSelectorOptions): UseModelsSele
 	}
 
 	function getDisplayOption(): ModelOption | undefined {
+		if (isGemini) {
+			const activeGemini =
+				modelsStore.selectedModelName ||
+				WorkbenchSettingsService.getSelectedGeminiModel() ||
+				WorkbenchSettingsService.getGeminiModel();
+			if (activeGemini) {
+				const found = options.find(
+					(opt) => opt.model === activeGemini || opt.id === activeGemini
+				);
+				if (found) return found;
+				return {
+					capabilities: ['chat', 'tools'],
+					id: activeGemini,
+					model: activeGemini,
+					name: activeGemini.replace(/^models\//, '')
+				};
+			}
+		}
+
 		if (!isRouter) {
 			const displayModel = serverModel || currentModel;
 

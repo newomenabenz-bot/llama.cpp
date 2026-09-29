@@ -27,7 +27,8 @@ export class ProviderService {
 	 */
 	static getProvider(id: ProviderId): IModelProvider | undefined {
 		this.ensureDefaults();
-		return this.providers.get(id);
+		const resolvedId = id === 'google-gemini' ? 'gemini' : id;
+		return this.providers.get(resolvedId);
 	}
 
 	/**
@@ -60,10 +61,11 @@ export class ProviderService {
 	 */
 	static setActiveProvider(id: ProviderId): void {
 		this.ensureDefaults();
-		if (!this.providers.has(id)) {
+		const resolvedId = id === 'google-gemini' ? 'gemini' : id;
+		if (!this.providers.has(resolvedId)) {
 			throw new Error(`Provider "${id}" is not registered`);
 		}
-		this.activeProviderId = id;
+		this.activeProviderId = resolvedId;
 	}
 
 	/**

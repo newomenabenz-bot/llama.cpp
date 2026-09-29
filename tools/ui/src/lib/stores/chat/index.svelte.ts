@@ -31,6 +31,7 @@ import { modelsStore } from '$lib/stores/models/index.svelte';
 import { serverStore } from '$lib/stores/server.svelte';
 import { settingsStore } from '$lib/stores/settings/index.svelte';
 import { toolsStore } from '$lib/stores/tools.svelte';
+import { WorkbenchSettingsService } from '$lib/workbench/settings/workbench-settings.service';
 import type {
 	ApiChatMessageData,
 	ChatMessagePromptProgress,
@@ -371,7 +372,14 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 			value !== undefined && value !== null && value !== '';
 		const apiOptions: Record<string, unknown> = { stream: true, timings_per_token: true };
 
-		if (serverStore.isRouterMode) {
+		if (WorkbenchSettingsService.getActiveProviderId() === 'gemini') {
+			const geminiModel =
+				modelsStore.selectedModelName ||
+				WorkbenchSettingsService.getSelectedGeminiModel() ||
+				WorkbenchSettingsService.getGeminiModel();
+
+			if (geminiModel) apiOptions.model = geminiModel;
+		} else if (serverStore.isRouterMode) {
 			const modelName = modelsStore.selectedModelName;
 
 			if (modelName) apiOptions.model = modelName;
@@ -809,13 +817,20 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 		// and reattach all agree, regardless of fresh send vs regenerate passing a resolved model
 		let effectiveModel: string | null | undefined = undefined;
 
-		if (serverStore.isRouterMode) {
+		const activeProvider = WorkbenchSettingsService.getActiveProviderId();
+		if (activeProvider === 'gemini') {
+			effectiveModel =
+				modelOverride ||
+				modelsStore.selectedModelName ||
+				WorkbenchSettingsService.getSelectedGeminiModel() ||
+				WorkbenchSettingsService.getGeminiModel();
+		} else if (serverStore.isRouterMode) {
 			const conversationModel = getConversationModel(allMessages);
 
 			effectiveModel = modelOverride || modelsStore.selectedModelName || conversationModel;
 		}
 
-		if (serverStore.isRouterMode && effectiveModel) {
+		if (serverStore.isRouterMode && effectiveModel && activeProvider !== 'gemini') {
 			if (!modelsStore.props.getModelProps(effectiveModel))
 				await modelsStore.props.fetchModelProps(effectiveModel);
 		}
@@ -1276,10 +1291,14 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 		assistantContent: string,
 		convId: string
 	): Promise<void> {
-		const effectiveModel =
-			serverStore.isRouterMode && modelsStore.selectedModelName
+		const isGemini = WorkbenchSettingsService.getActiveProviderId() === 'gemini';
+		const effectiveModel = isGemini
+			? (modelsStore.selectedModelName ||
+				WorkbenchSettingsService.getSelectedGeminiModel() ||
+				WorkbenchSettingsService.getGeminiModel())
+			: (serverStore.isRouterMode && modelsStore.selectedModelName
 				? modelsStore.selectedModelName
-				: undefined;
+				: undefined);
 		const configValue = settingsStore.config;
 		const titlePromptTemplate =
 			typeof configValue.titleGenerationPrompt === 'string' &&

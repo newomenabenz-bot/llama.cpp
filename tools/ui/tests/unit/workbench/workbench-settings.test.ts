@@ -46,11 +46,13 @@ import { MessageRole } from '$lib/enums';
 describe('WorkbenchSettingsService Persistence', () => {
 	beforeEach(() => {
 		localStorage.clear();
+		WorkbenchSettingsService.resetToDefaults();
 		ProviderService.reset();
 	});
 
 	afterEach(() => {
 		localStorage.clear();
+		WorkbenchSettingsService.resetToDefaults();
 		ProviderService.reset();
 		vi.restoreAllMocks();
 	});
@@ -123,6 +125,53 @@ describe('WorkbenchSettingsService Persistence', () => {
 		expect(gemini.getApiKey()).toBe('AIzaSyDirectSyncKey');
 		expect(gemini.getDefaultModel()).toBe('gemini-2.5-pro');
 		expect(gemini.isConfigured()).toBe(true);
+	});
+
+	it('persists and retrieves cached Gemini models', () => {
+		expect(WorkbenchSettingsService.getCachedGeminiModels()).toEqual([]);
+
+		const mockModels = [
+			{ id: 'models/gemini-2.5-pro', displayName: 'Gemini 2.5 Pro' },
+			{ id: 'models/gemini-2.5-flash', displayName: 'Gemini 2.5 Flash' }
+		];
+
+		WorkbenchSettingsService.saveCachedGeminiModels(mockModels);
+		expect(WorkbenchSettingsService.getCachedGeminiModels()).toEqual(mockModels);
+		expect(
+			JSON.parse(localStorage.getItem(WORKBENCH_STORAGE_KEYS.GEMINI_CACHED_MODELS) || '[]')
+		).toEqual(mockModels);
+
+		// Recovers from corrupted JSON gracefully
+		localStorage.setItem(WORKBENCH_STORAGE_KEYS.GEMINI_CACHED_MODELS, 'not-valid-json');
+		expect(WorkbenchSettingsService.getCachedGeminiModels()).toEqual([]);
+	});
+
+	it('persists and retrieves selected Gemini model', () => {
+		expect(WorkbenchSettingsService.getSelectedGeminiModel()).toBe('');
+
+		WorkbenchSettingsService.saveSelectedGeminiModel('models/gemini-2.5-flash');
+		expect(WorkbenchSettingsService.getSelectedGeminiModel()).toBe('models/gemini-2.5-flash');
+		expect(localStorage.getItem(WORKBENCH_STORAGE_KEYS.GEMINI_SELECTED_MODEL)).toBe(
+			'models/gemini-2.5-flash'
+		);
+
+		WorkbenchSettingsService.saveSelectedGeminiModel('');
+		expect(WorkbenchSettingsService.getSelectedGeminiModel()).toBe('');
+		expect(localStorage.getItem(WORKBENCH_STORAGE_KEYS.GEMINI_SELECTED_MODEL)).toBeNull();
+	});
+
+	it('resets cached models and selected model on resetToDefaults', () => {
+		WorkbenchSettingsService.saveCachedGeminiModels([
+			{ id: 'models/gemini-2.5-flash', displayName: 'Gemini 2.5 Flash' }
+		]);
+		WorkbenchSettingsService.saveSelectedGeminiModel('models/gemini-2.5-flash');
+
+		WorkbenchSettingsService.resetToDefaults();
+
+		expect(WorkbenchSettingsService.getCachedGeminiModels()).toEqual([]);
+		expect(WorkbenchSettingsService.getSelectedGeminiModel()).toBe('');
+		expect(localStorage.getItem(WORKBENCH_STORAGE_KEYS.GEMINI_CACHED_MODELS)).toBeNull();
+		expect(localStorage.getItem(WORKBENCH_STORAGE_KEYS.GEMINI_SELECTED_MODEL)).toBeNull();
 	});
 
 	it('notifies subscribers on any settings mutation', () => {

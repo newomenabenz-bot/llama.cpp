@@ -472,7 +472,15 @@ class AgenticStore {
 			turns: 0
 		};
 		const maxTurns = agenticConfig.maxTurns;
-		const effectiveModel = options.model || modelsStore.models[0]?.model || '';
+		const effectiveModel =
+			(typeof options.model === 'string' && options.model) ||
+			(WorkbenchSettingsService.getActiveProviderId() === 'gemini'
+				? (modelsStore.selectedModelName ||
+					WorkbenchSettingsService.getSelectedGeminiModel() ||
+					WorkbenchSettingsService.getGeminiModel())
+				: '') ||
+			modelsStore.models[0]?.model ||
+			'';
 
 		let turn = 0;
 

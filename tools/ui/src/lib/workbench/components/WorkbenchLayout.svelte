@@ -14,6 +14,7 @@
 		PanelLeft,
 		PanelRight,
 		RotateCcw,
+		Sparkles,
 		Terminal,
 		X
 	} from '@lucide/svelte';
@@ -22,8 +23,10 @@
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import { agenticStore } from '$lib/stores/agentic/index.svelte';
 	import { conversationsStore } from '$lib/stores/conversations/index.svelte';
+	import { modelsStore } from '$lib/stores/models/index.svelte';
 	import { WorkbenchAgentCheckpointService } from '../persistence/checkpoint.service';
 	import { WorkbenchRecoveryCoordinator } from '../persistence/recovery.coordinator';
+	import { WorkbenchSettingsService } from '../settings/workbench-settings.service';
 	import { terminalStore } from '../terminal/terminal.svelte';
 	import { workbenchShellStore } from '../shell/shell.svelte';
 	import { workspaceStore } from '../workspace/workspace.svelte';
@@ -133,6 +136,34 @@
 			bgClass: 'bg-muted/40 text-muted-foreground border-border/50',
 			label: 'Agent: Idle'
 		};
+	});
+
+	let settingsRevision = $state(0);
+
+	$effect(() => {
+		const unsubscribe = WorkbenchSettingsService.subscribe(() => {
+			settingsRevision += 1;
+		});
+		return unsubscribe;
+	});
+
+	// Active model derivation
+	let activeProvider = $derived.by(() => {
+		void settingsRevision;
+		return WorkbenchSettingsService.getActiveProviderId();
+	});
+
+	let activeModelDisplay = $derived.by(() => {
+		void settingsRevision;
+		if (activeProvider === 'gemini') {
+			return (
+				modelsStore.selectedModelName ||
+				WorkbenchSettingsService.getSelectedGeminiModel() ||
+				WorkbenchSettingsService.getGeminiModel() ||
+				'gemini-2.5-flash'
+			);
+		}
+		return modelsStore.selectedModelName || 'Default Model';
 	});
 
 	// Auto switch inspector tab when file or diff updates
@@ -255,6 +286,16 @@
 					<Activity class="size-3 text-primary shrink-0" />
 					<span class="text-[10px] font-semibold">{agentStatusSummary.label}</span>
 				</button>
+
+				<!-- Active Model Header Pill -->
+				<div
+					class="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium border border-border/60 bg-muted/30 text-foreground"
+					data-testid="header-active-model-pill"
+					title="Active Model: {activeModelDisplay}"
+				>
+					<Sparkles class="size-3 text-amber-500 shrink-0" />
+					<span class="text-[10px] font-semibold max-w-28 sm:max-w-40 truncate">{activeModelDisplay}</span>
+				</div>
 
 				<div class="h-4 w-px bg-border/60 mx-1 hidden sm:block"></div>
 

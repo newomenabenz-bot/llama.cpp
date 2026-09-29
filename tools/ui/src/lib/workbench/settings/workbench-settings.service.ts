@@ -15,7 +15,9 @@ export const WORKBENCH_STORAGE_KEYS = {
 	GEMINI_API_KEY: 'workbench_gemini_api_key',
 	GEMINI_MODEL: 'workbench_gemini_model',
 	EXECUTION_MODE: 'workbench_execution_mode',
-	WORKSPACE_ROOT: 'workbench_workspace_root'
+	WORKSPACE_ROOT: 'workbench_workspace_root',
+	GEMINI_CACHED_MODELS: 'workbench_gemini_cached_models',
+	GEMINI_SELECTED_MODEL: 'workbench_gemini_selected_model'
 } as const;
 
 export interface WorkbenchSettings {
@@ -33,6 +35,8 @@ export class WorkbenchSettingsService {
 	private static inMemoryProviderId: 'llama-server' | 'gemini' = 'llama-server';
 	private static inMemoryApiKey = '';
 	private static inMemoryModel = 'gemini-2.5-flash';
+	private static inMemorySelectedModel = '';
+	private static inMemoryCachedModels: Array<{ id: string; displayName: string }> = [];
 	private static inMemoryMode: ExecutionMode = 'SAFE';
 	private static inMemoryWorkspaceRoot = '';
 
@@ -135,6 +139,10 @@ export class WorkbenchSettingsService {
 	static getGeminiModel(): string {
 		if (typeof localStorage !== 'undefined') {
 			try {
+				const selected = localStorage.getItem(WORKBENCH_STORAGE_KEYS.GEMINI_SELECTED_MODEL);
+				if (selected && selected.trim()) {
+					return selected.trim();
+				}
 				const model = localStorage.getItem(WORKBENCH_STORAGE_KEYS.GEMINI_MODEL);
 				if (model && model.trim()) {
 					return model.trim();
@@ -146,7 +154,7 @@ export class WorkbenchSettingsService {
 			return 'gemini-2.5-flash';
 		}
 
-		return this.inMemoryModel;
+		return this.inMemorySelectedModel || this.inMemoryModel;
 	}
 
 	/**
@@ -155,10 +163,12 @@ export class WorkbenchSettingsService {
 	static setGeminiModel(model: string): void {
 		const cleanModel = model.trim() || 'gemini-2.5-flash';
 		this.inMemoryModel = cleanModel;
+		this.inMemorySelectedModel = cleanModel;
 
 		if (typeof localStorage !== 'undefined') {
 			try {
 				localStorage.setItem(WORKBENCH_STORAGE_KEYS.GEMINI_MODEL, cleanModel);
+				localStorage.setItem(WORKBENCH_STORAGE_KEYS.GEMINI_SELECTED_MODEL, cleanModel);
 			} catch (e) {
 				console.warn('[WorkbenchSettingsService] Failed to save Gemini model:', e);
 			}
@@ -166,6 +176,102 @@ export class WorkbenchSettingsService {
 
 		this.syncToProviderService();
 		this.notifyListeners();
+	}
+
+	/**
+	 * Persists discovered Gemini models to localStorage and in-memory cache.
+	 */
+	static saveCachedGeminiModels(models: Array<{ id: string; displayName: string }>): void {
+		this.inMemoryCachedModels = Array.isArray(models) ? [...models] : [];
+		if (typeof localStorage !== 'undefined') {
+			try {
+				localStorage.setItem(
+					WORKBENCH_STORAGE_KEYS.GEMINI_CACHED_MODELS,
+					JSON.stringify(this.inMemoryCachedModels)
+				);
+			} catch (e) {
+				console.warn('[WorkbenchSettingsService] Failed to cache Gemini models:', e);
+			}
+		}
+		this.notifyListeners();
+	}
+
+	/**
+	 * Retrieves cached Gemini models from localStorage or in-memory fallback.
+	 */
+	static getCachedGeminiModels(): Array<{ id: string; displayName: string }> {
+		if (typeof localStorage !== 'undefined') {
+			try {
+				const stored = localStorage.getItem(WORKBENCH_STORAGE_KEYS.GEMINI_CACHED_MODELS);
+				if (stored) {
+					const parsed = JSON.parse(stored);
+					if (Array.isArray(parsed) && parsed.length > 0) {
+						this.inMemoryCachedModels = parsed;
+						return parsed;
+					}
+					return [];
+				}
+				const legacy = localStorage.getItem('workbench_gemini_discovered_models');
+				if (legacy) {
+					const parsed = JSON.parse(legacy);
+					if (Array.isArray(parsed) && parsed.length > 0) {
+						this.inMemoryCachedModels = parsed;
+						return parsed;
+					}
+					return [];
+				}
+			} catch (e) {
+				console.warn('[WorkbenchSettingsService] Failed to load cached Gemini models:', e);
+				this.inMemoryCachedModels = [];
+				return [];
+			}
+		}
+		return this.inMemoryCachedModels || [];
+	}
+
+	/**
+	 * Persists selected Gemini model to localStorage and in-memory cache, syncing with provider.
+	 */
+	static saveSelectedGeminiModel(modelId: string): void {
+		const clean = (modelId || '').trim();
+		this.inMemorySelectedModel = clean;
+		if (clean) {
+			this.inMemoryModel = clean;
+		}
+		if (typeof localStorage !== 'undefined') {
+			try {
+				if (clean) {
+					localStorage.setItem(WORKBENCH_STORAGE_KEYS.GEMINI_SELECTED_MODEL, clean);
+					localStorage.setItem(WORKBENCH_STORAGE_KEYS.GEMINI_MODEL, clean);
+				} else {
+					localStorage.removeItem(WORKBENCH_STORAGE_KEYS.GEMINI_SELECTED_MODEL);
+				}
+			} catch (e) {
+				console.warn('[WorkbenchSettingsService] Failed to save selected Gemini model:', e);
+			}
+		}
+		this.syncToProviderService();
+		this.notifyListeners();
+	}
+
+	/**
+	 * Retrieves the currently selected Gemini model.
+	 */
+	static getSelectedGeminiModel(): string {
+		if (typeof localStorage !== 'undefined') {
+			try {
+				const stored = localStorage.getItem(WORKBENCH_STORAGE_KEYS.GEMINI_SELECTED_MODEL);
+				if (stored && stored.trim()) {
+					return stored.trim();
+				}
+			} catch {
+				// Fallback on storage errors
+			}
+		}
+		if (this.inMemorySelectedModel && this.inMemorySelectedModel.trim()) {
+			return this.inMemorySelectedModel.trim();
+		}
+		return '';
 	}
 
 	/**
@@ -262,6 +368,8 @@ export class WorkbenchSettingsService {
 		this.inMemoryProviderId = 'llama-server';
 		this.inMemoryApiKey = '';
 		this.inMemoryModel = 'gemini-2.5-flash';
+		this.inMemorySelectedModel = '';
+		this.inMemoryCachedModels = [];
 		this.inMemoryMode = 'SAFE';
 		this.inMemoryWorkspaceRoot = '';
 		policyService.setMode('SAFE');
@@ -273,6 +381,9 @@ export class WorkbenchSettingsService {
 				localStorage.removeItem(WORKBENCH_STORAGE_KEYS.GEMINI_MODEL);
 				localStorage.removeItem(WORKBENCH_STORAGE_KEYS.EXECUTION_MODE);
 				localStorage.removeItem(WORKBENCH_STORAGE_KEYS.WORKSPACE_ROOT);
+				localStorage.removeItem(WORKBENCH_STORAGE_KEYS.GEMINI_CACHED_MODELS);
+				localStorage.removeItem(WORKBENCH_STORAGE_KEYS.GEMINI_SELECTED_MODEL);
+				localStorage.removeItem('workbench_gemini_discovered_models');
 			} catch {
 				// ignore
 			}
