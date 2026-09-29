@@ -155,6 +155,7 @@ chmod +x "$RELEASE_ROOT/bin/llama-server"
 # Copy supervisor
 cp "$REPO_ROOT/scripts/workbench.sh" "$RELEASE_ROOT/scripts/workbench.sh"
 chmod +x "$RELEASE_ROOT/scripts/workbench.sh"
+chmod +x "$RELEASE_ROOT/scripts/"*.sh 2>/dev/null || true
 
 # Copy static Web UI / Workbench assets to public/
 echo "  Copying static Web UI / Workbench assets to public/..."
@@ -176,20 +177,15 @@ cat << 'EOF' > "$RELEASE_ROOT/README.md"
 This directory contains the self-contained production deployment bundle for **Llama Workbench**,
 embedding the full Web UI and Autonomous Agent IDE directly inside the high-performance native `llama-server`.
 
-## Quick Start (3 Steps)
+## Turnkey Quick Start
 
-1. **Configure Environment**:
-   ```bash
-   cp workbench.env.example workbench.env
-   # Edit workbench.env to configure WORKBENCH_PORT (default: 8080) or local GGUF model path
-   ```
-
-2. **Start the Supervisor**:
+1. **Start the Supervisor**:
    ```bash
    ./scripts/workbench.sh start
    ```
+   *Note: If `workbench.env` does not exist, `workbench.sh` automatically creates it from `workbench.env.example` with turnkey remote defaults (`WORKBENCH_HOST=0.0.0.0`, `WORKBENCH_PORT=8080`, `WORKBENCH_CORS_ORIGINS=*`).*
 
-3. **Verify Health & Logs**:
+2. **Verify Status & Logs**:
    ```bash
    ./scripts/workbench.sh status
    ./scripts/workbench.sh health

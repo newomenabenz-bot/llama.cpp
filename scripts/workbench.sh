@@ -21,21 +21,29 @@ resolve_path() {
 
 # 1. Load Environment Configuration
 ENV_FILE="$APP_ROOT/workbench.env"
+EXAMPLE_ENV="$APP_ROOT/workbench.env.example"
+
+if [ ! -f "$ENV_FILE" ] && [ -f "$EXAMPLE_ENV" ]; then
+	cp "$EXAMPLE_ENV" "$ENV_FILE"
+	echo "[INFO] No workbench.env found; created default configuration from template."
+fi
+
 if [ -f "$ENV_FILE" ]; then
 	set -a
 	# shellcheck disable=SC1090
 	source "$ENV_FILE"
 	set +a
-elif [ -f "$APP_ROOT/workbench.env.example" ]; then
+elif [ -f "$EXAMPLE_ENV" ]; then
 	set -a
 	# shellcheck disable=SC1090
-	source "$APP_ROOT/workbench.env.example"
+	source "$EXAMPLE_ENV"
 	set +a
 fi
 
 # 2. Configuration Defaults
-WORKBENCH_HOST="${WORKBENCH_HOST:-127.0.0.1}"
+WORKBENCH_HOST="${WORKBENCH_HOST:-0.0.0.0}"
 WORKBENCH_PORT="${WORKBENCH_PORT:-8080}"
+WORKBENCH_CORS_ORIGINS="${WORKBENCH_CORS_ORIGINS:-*}"
 WORKBENCH_MODEL_PATH="${WORKBENCH_MODEL_PATH:-}"
 WORKBENCH_CTX_SIZE="${WORKBENCH_CTX_SIZE:-4096}"
 WORKBENCH_N_THREADS="${WORKBENCH_N_THREADS:-4}"
@@ -108,6 +116,7 @@ do_start() {
 	local args=(
 		--host "$WORKBENCH_HOST"
 		--port "$WORKBENCH_PORT"
+		--cors-origins "${WORKBENCH_CORS_ORIGINS:-*}"
 		--ctx-size "$WORKBENCH_CTX_SIZE"
 		--threads "$WORKBENCH_N_THREADS"
 	)
@@ -129,11 +138,7 @@ do_start() {
 	fi
 
 	# Native Tool Engine & Jinja Tool Calling Support (DEF-QA-001)
-	if [ -n "$WORKBENCH_ENABLE_TOOLS" ]; then
-		args+=(--tools "$WORKBENCH_ENABLE_TOOLS" --jinja)
-	else
-		args+=(--tools all --jinja)
-	fi
+	args+=(--tools "${WORKBENCH_ENABLE_TOOLS:-all}" --jinja)
 
 	echo "[INFO] Starting Llama Workbench on http://${WORKBENCH_HOST}:${WORKBENCH_PORT}..."
 	nohup "$SERVER_BIN" "${args[@]}" >> "$WORKBENCH_LOG_FILE" 2>&1 &
@@ -143,8 +148,12 @@ do_start() {
 	# Poll health endpoint up to 30 seconds
 	echo -n "[INFO] Waiting for server health endpoint"
 	local healthy=false
+	local check_host="$WORKBENCH_HOST"
+	if [ "$check_host" = "0.0.0.0" ]; then
+		check_host="127.0.0.1"
+	fi
 	for _ in $(seq 1 30); do
-		if curl -s -f -m 2 "http://${WORKBENCH_HOST}:${WORKBENCH_PORT}/health" >/dev/null 2>&1; then
+		if curl -s -f -m 2 "http://${check_host}:${WORKBENCH_PORT}/health" >/dev/null 2>&1; then
 			healthy=true
 			break
 		fi
@@ -216,7 +225,11 @@ do_status() {
 		echo "  Endpoint:  http://${WORKBENCH_HOST}:${WORKBENCH_PORT}"
 		echo "  Workspace: $WORKBENCH_WORKSPACE_DIR"
 		echo "  Logs:      $WORKBENCH_LOG_FILE"
-		if curl -s -f -m 2 "http://${WORKBENCH_HOST}:${WORKBENCH_PORT}/health" >/dev/null 2>&1; then
+		local check_host="$WORKBENCH_HOST"
+		if [ "$check_host" = "0.0.0.0" ]; then
+			check_host="127.0.0.1"
+		fi
+		if curl -s -f -m 2 "http://${check_host}:${WORKBENCH_PORT}/health" >/dev/null 2>&1; then
 			echo "  Health:    OK (200)"
 		else
 			echo "  Health:    Degraded or Not Responding"
@@ -227,10 +240,14 @@ do_status() {
 }
 
 do_health() {
-	echo "Querying http://${WORKBENCH_HOST}:${WORKBENCH_PORT}/health..."
-	curl -s -i "http://${WORKBENCH_HOST}:${WORKBENCH_PORT}/health" || {
+	local check_host="$WORKBENCH_HOST"
+	if [ "$check_host" = "0.0.0.0" ]; then
+		check_host="127.0.0.1"
+	fi
+	echo "Querying http://${check_host}:${WORKBENCH_PORT}/health..."
+	curl -s -i "http://${check_host}:${WORKBENCH_PORT}/health" || {
 		echo ""
-		echo "[ERROR] Unable to reach http://${WORKBENCH_HOST}:${WORKBENCH_PORT}/health"
+		echo "[ERROR] Unable to reach http://${check_host}:${WORKBENCH_PORT}/health"
 		exit 1
 	}
 	echo ""

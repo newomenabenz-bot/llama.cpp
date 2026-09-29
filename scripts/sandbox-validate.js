@@ -336,9 +336,51 @@ console.log(`  ✓ Extracted Web UI static document root confirmed at public/ind
 // ------------------------------------------------------------------------------
 console.log(`[STEP 6/6] Executing runtime lifecycle validation in isolated sandbox on port ${TEST_PORT}...`);
 
-// Prepare sandbox environment
+// Verify automatic configuration bootstrapping when workbench.env is missing
+console.log('  Testing automatic configuration bootstrapping when workbench.env is missing...');
 const sandboxEnvFile = path.join(EXTRACTED_DIR, 'workbench.env');
-fs.copyFileSync(path.join(EXTRACTED_DIR, 'workbench.env.example'), sandboxEnvFile);
+if (fs.existsSync(sandboxEnvFile)) {
+  fs.rmSync(sandboxEnvFile);
+}
+
+let shBin = null;
+const candidateShPaths = [
+  'C:\\Users\\Administrator\\mingit\\usr\\bin\\sh.exe',
+  'C:\\Program Files\\Git\\bin\\bash.exe',
+  'C:\\Program Files\\Git\\usr\\bin\\sh.exe',
+  '/usr/bin/bash',
+  '/bin/bash',
+  '/bin/sh',
+];
+for (const p of candidateShPaths) {
+  if (fs.existsSync(p)) {
+    shBin = p;
+    break;
+  }
+}
+
+if (shBin) {
+  const shDir = path.dirname(shBin);
+  const testEnv = {
+    ...process.env,
+    PATH: `${shDir}${path.delimiter}${process.env.PATH || ''}`,
+  };
+  const bootstrapOut = execSync(`"${shBin}" ./scripts/workbench.sh status`, {
+    cwd: EXTRACTED_DIR,
+    env: testEnv,
+    encoding: 'utf8',
+  });
+  if (!fs.existsSync(sandboxEnvFile)) {
+    throw new Error('workbench.sh failed to auto-bootstrap workbench.env from template');
+  }
+  if (!bootstrapOut.includes('No workbench.env found; created default configuration from template')) {
+    throw new Error('workbench.sh did not log expected bootstrap message');
+  }
+  console.log('  ✓ Verified workbench.sh auto-bootstraps workbench.env on first run without error.');
+} else {
+  fs.copyFileSync(path.join(EXTRACTED_DIR, 'workbench.env.example'), sandboxEnvFile);
+  console.log('  ✓ workbench.env.example template presence verified.');
+}
 
 const serverBin = path.join(EXTRACTED_DIR, 'bin', 'llama-server');
 const extractedPublicDir = path.join(EXTRACTED_DIR, 'public');
