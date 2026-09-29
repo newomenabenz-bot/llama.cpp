@@ -85,7 +85,7 @@ if [ ! -f "$DIST_DIR/_app/version.json" ]; then
 	exit 1
 fi
 
-if ! find "$DIST_DIR" -name "bundle.*.js" -o -name "bundle.*.css" | grep -q .; then
+if ! find "$DIST_DIR" -name "bundle.*.js" -o -name "*.css" | grep -q .; then
 	echo "[ERROR] Missing bundled JS/CSS assets in $DIST_DIR" >&2
 	exit 1
 fi
