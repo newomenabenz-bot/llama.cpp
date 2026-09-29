@@ -10,7 +10,7 @@ import { SvelteKitPWA } from '@vite-pwa/sveltekit';
 import { playwright } from '@vitest/browser-playwright';
 import { dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
-import { defineConfig, loadEnv, searchForWorkspaceRoot } from 'vite';
+import { defineConfig, loadEnv, searchForWorkspaceRoot, type Plugin } from 'vite';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -24,6 +24,38 @@ const browserBaseConfig: any = {
 	})
 };
 
+function splitChunksPlugin(): Plugin {
+	return {
+		name: 'workbench-split-chunks',
+		enforce: 'post',
+		config() {
+			return {
+				build: {
+					rollupOptions: {
+						output: {
+							inlineDynamicImports: false
+						}
+					}
+				}
+			};
+		},
+		configResolved(config) {
+			const output = config.build.rollupOptions.output;
+			if (output) {
+				if (Array.isArray(output)) {
+					for (const o of output) {
+						o.inlineDynamicImports = false;
+						o.chunkFileNames = '_app/immutable/chunks/[name]-[hash].js';
+					}
+				} else {
+					output.inlineDynamicImports = false;
+					output.chunkFileNames = '_app/immutable/chunks/[name]-[hash].js';
+				}
+			}
+		}
+	};
+}
+
 export default defineConfig(({ mode }) => {
 	const env = loadEnv(mode, process.cwd(), 'VITE_PUBLIC_');
 	const SERVER_ORIGIN = env.VITE_PUBLIC_SERVER_ORIGIN || 'http://localhost:8080';
@@ -31,8 +63,77 @@ export default defineConfig(({ mode }) => {
 	return {
 		build: {
 			assetsInlineLimit: 32000,
-			chunkSizeWarningLimit: 3072,
-			minify: true
+			chunkSizeWarningLimit: 1000,
+			minify: true,
+			rollupOptions: {
+				output: {
+					inlineDynamicImports: false,
+					manualChunks(id: string) {
+						if (
+							id.includes('nerdamer') ||
+							id.includes('katex') ||
+							id.includes('rehype-katex') ||
+							id.includes('remark-math') ||
+							id.includes('big-integer') ||
+							id.includes('decimal.js')
+						) {
+							return 'vendor-math';
+						}
+						if (
+							id.includes('@lucide/svelte') ||
+							id.includes('bits-ui') ||
+							id.includes('radix') ||
+							id.includes('@floating-ui') ||
+							id.includes('svelte-sonner') ||
+							id.includes('mode-watcher')
+						) {
+							return 'vendor-ui';
+						}
+						if (
+							id.includes('d3') ||
+							id.includes('dagre') ||
+							id.includes('cytoscape')
+						) {
+							return 'vendor-graph';
+						}
+						if (
+							id.includes('mermaid') ||
+							id.includes('khroma') ||
+							id.includes('stylis')
+						) {
+							return 'vendor-mermaid';
+						}
+						if (
+							id.includes('highlight.js') ||
+							id.includes('rehype-highlight')
+						) {
+							return 'vendor-highlight';
+						}
+						if (
+							id.includes('remark') ||
+							id.includes('rehype') ||
+							id.includes('unified') ||
+							id.includes('unist') ||
+							id.includes('mdast') ||
+							id.includes('mdsvex') ||
+							id.includes('dompurify') ||
+							id.includes('micromark') ||
+							id.includes('vfile')
+						) {
+							return 'vendor-markdown';
+						}
+						if (id.includes('pdfjs-dist') || id.includes('fflate')) {
+							return 'vendor-pdf';
+						}
+						if (
+							id.includes('/src/lib/workbench/') ||
+							id.includes('\\src\\lib\\workbench\\')
+						) {
+							return 'workbench-core';
+						}
+					}
+				}
+			}
 		},
 
 		plugins: [
@@ -42,7 +143,8 @@ export default defineConfig(({ mode }) => {
 			splashScreenPlugin(),
 			buildInfoPlugin(),
 			nerdamerPlugin(),
-			relativizeBasePlugin()
+			relativizeBasePlugin(),
+			splitChunksPlugin()
 		],
 
 		resolve: {
