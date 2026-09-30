@@ -49,12 +49,16 @@ export class SettingsService {
 	static migrateLegacyTheme(): string | null {
 		if (!browser) return null;
 
-		const legacyTheme = localStorage.getItem('theme');
+		try {
+			const legacyTheme = localStorage.getItem('theme');
 
-		if (legacyTheme) {
-			localStorage.removeItem('theme');
+			if (legacyTheme) {
+				localStorage.removeItem('theme');
 
-			return legacyTheme;
+				return legacyTheme;
+			}
+		} catch {
+			return null;
 		}
 
 		return null;

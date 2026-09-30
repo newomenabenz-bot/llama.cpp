@@ -147,7 +147,11 @@ class TabsStore {
 		// route sync (layout effect runs before async init) would clobber them
 		if (!browser || !this.initialized) return;
 
-		localStorage.setItem(CONVERSATION_TABS_LOCALSTORAGE_KEY, JSON.stringify(this.openTabs));
+		try {
+			localStorage.setItem(CONVERSATION_TABS_LOCALSTORAGE_KEY, JSON.stringify(this.openTabs));
+		} catch (e) {
+			console.warn('[TabsStore] Failed to save conversation tabs to localStorage:', e);
+		}
 	}
 }
 

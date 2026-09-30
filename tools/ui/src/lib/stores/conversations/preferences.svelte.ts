@@ -36,7 +36,11 @@ function loadReasoningEffortDefault(): ReasoningEffort {
 function saveReasoningEffortDefault(effort: ReasoningEffort): void {
 	if (typeof globalThis.localStorage === 'undefined') return;
 
-	localStorage.setItem(REASONING_EFFORT_DEFAULT_LOCALSTORAGE_KEY, effort);
+	try {
+		localStorage.setItem(REASONING_EFFORT_DEFAULT_LOCALSTORAGE_KEY, effort);
+	} catch {
+		// Silently ignore if localStorage is restricted
+	}
 }
 
 /**

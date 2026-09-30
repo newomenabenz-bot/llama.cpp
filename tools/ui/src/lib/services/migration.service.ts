@@ -72,14 +72,18 @@ function getMigrationState(): MigrationState {
 }
 
 function saveMigrationState(state: MigrationState): void {
-	localStorage.setItem(
-		MIGRATION_STATE_KEY,
-		JSON.stringify({
-			version: MIGRATION_STATE_VERSION,
-			...state,
-			lastRun: new Date().toISOString()
-		})
-	);
+	try {
+		localStorage.setItem(
+			MIGRATION_STATE_KEY,
+			JSON.stringify({
+				version: MIGRATION_STATE_VERSION,
+				...state,
+				lastRun: new Date().toISOString()
+			})
+		);
+	} catch (e) {
+		console.warn('[MigrationService] Failed to save migration state to localStorage:', e);
+	}
 }
 
 function isMigrationCompleted(id: string): boolean {
