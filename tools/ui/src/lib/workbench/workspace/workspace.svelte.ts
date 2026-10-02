@@ -147,22 +147,51 @@ export class WorkspaceStore {
 	}
 
 	/**
-	 * Toggles a folder's expanded state.
+	 * Toggles a folder's expanded state and dynamically fetches children if unpopulated.
 	 */
-	toggleFolder(path: string): void {
+	async toggleFolder(path: string): Promise<void> {
 		const normalized = normalizeWorkspacePath(path);
 		if (!normalized) return;
 
+		const isExpanding = !this.expandedPaths.has(normalized);
 		const nextExpanded = new Set(this.expandedPaths);
-		if (nextExpanded.has(normalized)) {
-			nextExpanded.delete(normalized);
-		} else {
+		if (isExpanding) {
 			nextExpanded.add(normalized);
+		} else {
+			nextExpanded.delete(normalized);
 		}
 		this.expandedPaths = nextExpanded;
 
 		// Update node expansion on the current tree
 		this.tree = toggleNodeExpansion(this.tree, normalized);
+
+		if (isExpanding) {
+			const node = findNodeByPath(this.tree, normalized);
+			if (node && node.type === 'directory' && (!node.children || node.children.length === 0)) {
+				try {
+					const children = await WorkbenchWorkspaceService.fetchDirectoryChildren(
+						normalized,
+						this.rootPath
+					);
+					if (children.length > 0) {
+						const pathSet = new Set(this.flatPaths);
+						let changed = false;
+						for (const child of children) {
+							if (!pathSet.has(child)) {
+								pathSet.add(child);
+								changed = true;
+							}
+						}
+						if (changed) {
+							this.flatPaths = Array.from(pathSet);
+							this.tree = buildFileTree(this.flatPaths, this.filterConfig, this.expandedPaths);
+						}
+					}
+				} catch (err) {
+					console.warn('[WorkspaceStore] On-demand directory fetch failed for', normalized, err);
+				}
+			}
+		}
 	}
 
 	/**

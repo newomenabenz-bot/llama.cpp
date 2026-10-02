@@ -44,8 +44,10 @@ export class WorkbenchWorkspaceService {
 			const rawResult = await ToolsService.executeToolRaw(
 				BuiltInTool.SERVER_FILE_GLOB_SEARCH,
 				{
-					include: '**/*',
-					path: normalizedRoot
+					exclude: '{.git/**,node_modules/**,build*/**,.cache/**,dist*/**,.npm/**}',
+					limit: 100,
+					path: normalizedRoot,
+					type: 'all'
 				},
 				signal,
 				normalizedRoot
@@ -57,7 +59,18 @@ export class WorkbenchWorkspaceService {
 				// 1. Structured entries field (preserved by executeToolRaw)
 				if (Array.isArray(rawResult.entries)) {
 					for (const entry of rawResult.entries) {
-						if (typeof entry === 'string') rawList.push(entry);
+						if (typeof entry === 'string') {
+							rawList.push(entry);
+						} else if (
+							entry &&
+							typeof entry === 'object' &&
+							'path' in entry &&
+							typeof (entry as { path: unknown }).path === 'string'
+						) {
+							const obj = entry as { path: string; type?: string };
+							const isDir = obj.type === 'dir' || obj.type === 'directory';
+							rawList.push(isDir && !obj.path.endsWith('/') ? `${obj.path}/` : obj.path);
+						}
 					}
 				} else if (typeof rawResult.plain_text_response === 'string') {
 					// 2. Plain text response summary
@@ -122,5 +135,60 @@ export class WorkbenchWorkspaceService {
 		}
 
 		return result.content;
+	}
+
+	/**
+	 * Fetches direct child files and folders under a specific sub-directory for on-demand expansion.
+	 *
+	 * @param dirPath - Subdirectory path relative to workspace root
+	 * @param rootPath - Workspace root path (defaults to '/home/ubuntu')
+	 * @param signal - Optional abort signal
+	 */
+	static async fetchDirectoryChildren(
+		dirPath: string,
+		rootPath: string = '/home/ubuntu',
+		signal?: AbortSignal
+	): Promise<string[]> {
+		const cleanDir = normalizeWorkspacePath(dirPath);
+		const targetPath = cleanDir ? `${rootPath}/${cleanDir}` : rootPath;
+
+		try {
+			const rawResult = await ToolsService.executeToolRaw(
+				BuiltInTool.SERVER_FILE_GLOB_SEARCH,
+				{
+					exclude: '{.git/**,node_modules/**,build*/**,.cache/**,dist*/**,.npm/**}',
+					limit: 100,
+					max_depth: 2,
+					path: targetPath,
+					type: 'all'
+				},
+				signal,
+				targetPath
+			);
+
+			const results: string[] = [];
+			if (rawResult && Array.isArray(rawResult.entries)) {
+				for (const entry of rawResult.entries) {
+					let rel =
+						typeof entry === 'string'
+							? entry
+							: (entry && typeof entry === 'object' && 'path' in entry ? String((entry as { path: unknown }).path) : '');
+					const isDir =
+						entry &&
+						typeof entry === 'object' &&
+						('type' in entry && (entry.type === 'dir' || entry.type === 'directory'));
+					if (rel) {
+						if (cleanDir && !rel.startsWith(cleanDir)) {
+							rel = `${cleanDir}/${rel}`;
+						}
+						results.push(isDir && !rel.endsWith('/') ? `${rel}/` : rel);
+					}
+				}
+			}
+			return results;
+		} catch (err) {
+			console.warn('[WorkbenchWorkspaceService] fetchDirectoryChildren failed for', dirPath, err);
+			return [];
+		}
 	}
 }

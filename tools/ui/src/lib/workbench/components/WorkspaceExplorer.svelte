@@ -17,6 +17,7 @@
 	import { terminalStore } from '../terminal/terminal.svelte';
 	import type { WorkspaceFileNode } from '../workspace/types';
 	import { workspaceStore } from '../workspace/workspace.svelte';
+	import { onMount } from 'svelte';
 	import WorkspaceDiffViewer from './WorkspaceDiffViewer.svelte';
 	import WorkspaceFileViewer from './WorkspaceFileViewer.svelte';
 	import WorkspaceTerminal from './WorkspaceTerminal.svelte';
@@ -44,6 +45,12 @@
 	$effect(() => {
 		if (workspaceStore.diffPayload || workspaceStore.selectedPath) {
 			activeTab = 'viewer';
+		}
+	});
+
+	onMount(() => {
+		if (workspaceStore.tree.length === 0 && !workspaceStore.isLoading) {
+			void workspaceStore.refreshTree();
 		}
 	});
 

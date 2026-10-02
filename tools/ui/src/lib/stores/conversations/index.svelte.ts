@@ -15,6 +15,7 @@ import { ConversationTransferService } from '$lib/services/conversation-transfer
 import { DatabaseService } from '$lib/services/database.service';
 import { MigrationService } from '$lib/services/migration.service';
 import { RouterService } from '$lib/services/router.service';
+import { ServerStorageSyncService } from '$lib/services/server-storage-sync.service';
 // direct imports between stores, not via the barrel, to avoid circular deps
 import {
 	ConversationPreferences,
@@ -502,6 +503,13 @@ class ConversationsStore implements ConversationsPreferencesHost {
 		this.initPromise = (async () => {
 			try {
 				await MigrationService.runAllMigrations();
+				ServerStorageSyncService.initSync();
+				try {
+					await ServerStorageSyncService.pullConversations();
+					await ServerStorageSyncService.pullSettings();
+				} catch (syncErr) {
+					console.warn('[conversationsStore] Server sync initial pull warning:', syncErr);
+				}
 				await this.loadConversations();
 				this.isInitialized = true;
 			} catch (error) {

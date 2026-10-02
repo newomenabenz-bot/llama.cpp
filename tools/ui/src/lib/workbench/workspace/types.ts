@@ -36,7 +36,19 @@ export interface WorkspaceFilterConfig {
 }
 
 export const DEFAULT_WORKSPACE_FILTER_CONFIG: WorkspaceFilterConfig = {
-	ignoredPatterns: ['.git', 'node_modules', 'dist', '.svelte-kit', '.DS_Store'],
+	ignoredPatterns: [
+		'.git/**',
+		'node_modules/**',
+		'build*/**',
+		'.cache/**',
+		'dist*/**',
+		'.npm/**',
+		'.git',
+		'node_modules',
+		'dist',
+		'.svelte-kit',
+		'.DS_Store'
+	],
 	maxDepth: 10,
 	maxFiles: 5000
 };

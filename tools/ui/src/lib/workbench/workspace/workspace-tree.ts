@@ -58,16 +58,30 @@ export function getFileExtension(filename: string): string {
 
 /**
  * Checks whether any segment of a path matches the configured ignored patterns.
+ * Supports exact matches and glob patterns (such as .git, build wildcards, and dot-cache).
  */
 export function shouldIgnorePath(normalizedPath: string, ignoredPatterns: string[]): boolean {
 	if (!normalizedPath || ignoredPatterns.length === 0) return false;
 
 	const segments = normalizedPath.split('/');
 	for (const segment of segments) {
-		for (const pattern of ignoredPatterns) {
+		for (const rawPattern of ignoredPatterns) {
+			// Normalize pattern: strip trailing '/**' or '/*'
+			const pattern = rawPattern.replace(/\/\*\*?$/, '');
+
 			if (pattern === segment) return true;
-			// Match patterns like '*.tmp' or exact prefix
-			if (pattern.startsWith('*') && segment.endsWith(pattern.slice(1))) return true;
+
+			// Handle wildcards like build* or dist*
+			if (pattern.endsWith('*') && !pattern.startsWith('*')) {
+				const prefix = pattern.slice(0, -1);
+				if (segment.startsWith(prefix)) return true;
+			} else if (pattern.startsWith('*') && !pattern.endsWith('*')) {
+				const suffix = pattern.slice(1);
+				if (segment.endsWith(suffix)) return true;
+			} else if (pattern.includes('*')) {
+				const regex = new RegExp('^' + pattern.replace(/\*/g, '.*') + '$');
+				if (regex.test(segment)) return true;
+			}
 		}
 	}
 	return false;

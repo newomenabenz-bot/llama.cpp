@@ -349,3 +349,5 @@ export { MigrationService } from './migration.service';
  * @see settingsStore in stores/settings/index.svelte.ts - reactive state + business logic
  */
 export { SettingsService } from './settings.service';
+export { ServerStorageSyncService } from './server-storage-sync.service';
+

@@ -27,6 +27,29 @@ class LlamaUiDatabase extends Dexie {
 const db = new LlamaUiDatabase();
 
 export class DatabaseService {
+	private static mutationListeners = new Set<() => void>();
+
+	/**
+	 * Registers a listener callback invoked whenever conversations or messages
+	 * are modified in IndexedDB. Returns an unregister function.
+	 */
+	static onMutation(callback: () => void): () => void {
+		this.mutationListeners.add(callback);
+		return () => {
+			this.mutationListeners.delete(callback);
+		};
+	}
+
+	private static notifyMutation(): void {
+		for (const listener of this.mutationListeners) {
+			try {
+				listener();
+			} catch (e) {
+				console.warn('[DatabaseService] mutation listener error:', e);
+			}
+		}
+	}
+
 	/**
 	 * Deletes multiple conversations in a single transaction. Each deleted
 	 * conversation has its direct children reparented to the nearest surviving
@@ -81,6 +104,7 @@ export class DatabaseService {
 				await db[IDXDB_TABLES.messages].where('convId').anyOf(cleanIds).delete();
 			}
 		);
+		this.notifyMutation();
 	}
 
 	/**
@@ -119,6 +143,7 @@ export class DatabaseService {
 			await db[IDXDB_TABLES.conversations].bulkPut(updates);
 		});
 
+		this.notifyMutation();
 		return result;
 	}
 
@@ -142,6 +167,7 @@ export class DatabaseService {
 		};
 
 		await db[IDXDB_TABLES.conversations].add(conversation);
+		this.notifyMutation();
 
 		return conversation;
 	}
@@ -158,7 +184,7 @@ export class DatabaseService {
 		message: Omit<DatabaseMessage, 'id'>,
 		parentId: string | null
 	): Promise<DatabaseMessage> {
-		return await db.transaction(
+		const result = await db.transaction(
 			'rw',
 			[db[IDXDB_TABLES.conversations], db[IDXDB_TABLES.messages]],
 			async () => {
@@ -193,6 +219,8 @@ export class DatabaseService {
 				return newMessage;
 			}
 		);
+		this.notifyMutation();
+		return result;
 	}
 
 	/**
@@ -216,6 +244,7 @@ export class DatabaseService {
 		};
 
 		await db[IDXDB_TABLES.messages].add(rootMessage);
+		this.notifyMutation();
 
 		return rootMessage.id;
 	}
@@ -240,7 +269,7 @@ export class DatabaseService {
 			throw new Error('Cannot create system message with empty content');
 		}
 
-		return await db.transaction('rw', db[IDXDB_TABLES.messages], async () => {
+		const result = await db.transaction('rw', db[IDXDB_TABLES.messages], async () => {
 			const parentMessage = await db[IDXDB_TABLES.messages].get(parentId);
 
 			if (!parentMessage) {
@@ -263,6 +292,8 @@ export class DatabaseService {
 
 			return systemMessage;
 		});
+		this.notifyMutation();
+		return result;
 	}
 
 	/**
@@ -307,6 +338,7 @@ export class DatabaseService {
 				await db[IDXDB_TABLES.messages].where('convId').equals(id).delete();
 			}
 		);
+		this.notifyMutation();
 	}
 
 	/**
@@ -324,6 +356,7 @@ export class DatabaseService {
 
 			await db[IDXDB_TABLES.messages].delete(messageId);
 		});
+		this.notifyMutation();
 	}
 
 	/**
@@ -338,7 +371,7 @@ export class DatabaseService {
 		conversationId: string,
 		messageId: string
 	): Promise<string[]> {
-		return await db.transaction('rw', db[IDXDB_TABLES.messages], async () => {
+		const result = await db.transaction('rw', db[IDXDB_TABLES.messages], async () => {
 			// Get all messages in the conversation to find descendants
 			const allMessages = await db[IDXDB_TABLES.messages]
 				.where('convId')
@@ -354,6 +387,8 @@ export class DatabaseService {
 
 			return allToDelete;
 		});
+		this.notifyMutation();
+		return result;
 	}
 
 	/**
@@ -370,7 +405,7 @@ export class DatabaseService {
 		atMessageId: string,
 		options: { name: string; includeAttachments: boolean }
 	): Promise<DatabaseConversation> {
-		return await db.transaction(
+		const result = await db.transaction(
 			'rw',
 			[db[IDXDB_TABLES.conversations], db[IDXDB_TABLES.messages]],
 			async () => {
@@ -439,6 +474,8 @@ export class DatabaseService {
 				return newConv;
 			}
 		);
+		this.notifyMutation();
+		return result;
 	}
 
 	/**
@@ -554,6 +591,55 @@ export class DatabaseService {
 	}
 
 	/**
+	 * Synchronizes conversations and messages pulled from the server into IndexedDB.
+	 * Upserts conversations and messages, preserving newer edits without triggering mutation cycle.
+	 *
+	 * @param data - Array of { conv, messages } from server snapshot
+	 */
+	static async syncWithServer(
+		data: { conv: DatabaseConversation; messages: DatabaseMessage[] }[]
+	): Promise<{ importedCount: number; updatedCount: number }> {
+		if (!data || data.length === 0) return { importedCount: 0, updatedCount: 0 };
+
+		let importedCount = 0;
+		let updatedCount = 0;
+
+		await db.transaction(
+			'rw',
+			[db[IDXDB_TABLES.conversations], db[IDXDB_TABLES.messages]],
+			async () => {
+				for (const item of data) {
+					const { conv, messages } = item;
+					if (!conv || !conv.id) continue;
+
+					const existing = await db[IDXDB_TABLES.conversations].get(conv.id);
+					if (!existing) {
+						await db[IDXDB_TABLES.conversations].add(conv);
+						importedCount++;
+					} else {
+						const serverModified = conv.lastModified ?? 0;
+						const localModified = existing.lastModified ?? 0;
+						if (serverModified >= localModified) {
+							await db[IDXDB_TABLES.conversations].put(conv);
+							updatedCount++;
+						}
+					}
+
+					if (Array.isArray(messages) && messages.length > 0) {
+						for (const msg of messages) {
+							if (msg && msg.id) {
+								await db[IDXDB_TABLES.messages].put(msg);
+							}
+						}
+					}
+				}
+			}
+		);
+
+		return { importedCount, updatedCount };
+	}
+
+	/**
 	 * Toggles the pinned status of a conversation.
 	 *
 	 * @param id - Conversation ID
@@ -586,6 +672,7 @@ export class DatabaseService {
 		updates: Partial<Omit<DatabaseConversation, 'id'>>
 	): Promise<void> {
 		await db[IDXDB_TABLES.conversations].update(id, updates);
+		this.notifyMutation();
 	}
 
 	/**
@@ -613,6 +700,7 @@ export class DatabaseService {
 		updates: Partial<Omit<DatabaseMessage, 'id'>>
 	): Promise<void> {
 		await db[IDXDB_TABLES.messages].update(id, updates);
+		this.notifyMutation();
 	}
 
 	/**
