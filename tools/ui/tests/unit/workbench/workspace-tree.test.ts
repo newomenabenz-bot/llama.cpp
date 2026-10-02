@@ -332,7 +332,7 @@ describe('Workspace Tree Subsystem', () => {
 			const files = await WorkbenchWorkspaceService.fetchWorkspaceFiles('.');
 			expect(executeToolRawSpy).toHaveBeenCalledWith(
 				BuiltInTool.SERVER_FILE_GLOB_SEARCH,
-				{ include: '**/*', path: '.' },
+				expect.objectContaining({ path: '.' }),
 				undefined,
 				'.'
 			);

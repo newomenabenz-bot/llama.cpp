@@ -88,12 +88,13 @@ export class WorkbenchWorkspaceService {
 			const seen = new Set<string>();
 
 			for (const raw of rawList) {
+				const isDir = raw.endsWith('/') || raw.endsWith('\\');
 				const norm = normalizeWorkspacePath(raw);
 				if (!norm || seen.has(norm)) continue;
 				seen.add(norm);
 
 				if (!shouldIgnorePath(norm, config.ignoredPatterns)) {
-					validPaths.push(norm);
+					validPaths.push(isDir ? `${norm}/` : norm);
 				}
 
 				if (validPaths.length >= config.maxFiles) break;

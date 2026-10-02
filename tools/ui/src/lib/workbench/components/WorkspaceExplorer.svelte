@@ -299,7 +299,7 @@
 						</p>
 					</div>
 				{:else}
-					{#each displayedTree as node (node.id)}
+					{#each displayedTree as node (node.id || `${node.type}:${node.path}`)}
 						<WorkspaceTreeNode {node} level={0} />
 					{/each}
 				{/if}

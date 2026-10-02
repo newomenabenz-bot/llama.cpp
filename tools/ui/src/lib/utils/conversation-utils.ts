@@ -68,10 +68,19 @@ const comparePinnedThenRecent = (a: DatabaseConversation, b: DatabaseConversatio
  * Range-select / marquee in the sidebar rely on this alignment.
  */
 export function buildConversationTree(convs: DatabaseConversation[]): ConversationTreeItem[] {
+	const uniqueConvs: DatabaseConversation[] = [];
+	const seenInputIds = new Set<string>();
+	for (const c of convs) {
+		if (c && c.id && !seenInputIds.has(c.id)) {
+			seenInputIds.add(c.id);
+			uniqueConvs.push(c);
+		}
+	}
+
 	const childrenByParent = new Map<string, DatabaseConversation[]>();
 	const forkIds = new Set<string>();
 
-	for (const conv of convs) {
+	for (const conv of uniqueConvs) {
 		if (conv.forkedFromConversationId) {
 			forkIds.add(conv.id);
 
@@ -86,6 +95,7 @@ export function buildConversationTree(convs: DatabaseConversation[]): Conversati
 	const visited = new Set<string>();
 
 	function walk(conv: DatabaseConversation, depth: number) {
+		if (visited.has(conv.id)) return;
 		visited.add(conv.id);
 		result.push({ conversation: conv, depth });
 
@@ -100,13 +110,13 @@ export function buildConversationTree(convs: DatabaseConversation[]): Conversati
 		}
 	}
 
-	const roots = convs.filter((c) => !forkIds.has(c.id)).sort(comparePinnedThenRecent);
+	const roots = uniqueConvs.filter((c) => !forkIds.has(c.id)).sort(comparePinnedThenRecent);
 
 	for (const root of roots) {
 		walk(root, 0);
 	}
 
-	for (const conv of convs) {
+	for (const conv of uniqueConvs) {
 		if (!visited.has(conv.id)) {
 			walk(conv, 1);
 		}

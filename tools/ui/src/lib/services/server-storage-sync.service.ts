@@ -62,13 +62,20 @@ export class ServerStorageSyncService {
 	private static initialized = false;
 	private static isApplyingServerSettings = false;
 
+	private static isClientRuntime(): boolean {
+		if (typeof process !== 'undefined' && (process.env?.VITEST || process.env?.NODE_ENV === 'test')) {
+			return true;
+		}
+		return Boolean(browser || typeof window !== 'undefined');
+	}
+
 	/**
 	 * Initializes the server storage synchronization subsystem.
 	 * Registers database mutation listeners, settings listeners, window focus/visibility listeners,
 	 * and periodic sync.
 	 */
 	static initSync(): void {
-		if (!browser || this.initialized) return;
+		if (!this.isClientRuntime() || this.initialized) return;
 		this.initialized = true;
 
 		// 1. Listen for database mutations (new/updated messages, conversations)
@@ -109,7 +116,7 @@ export class ServerStorageSyncService {
 	 * Pulls conversations from the server and hydrates local IndexedDB.
 	 */
 	static async pullConversations(): Promise<boolean> {
-		if (!browser || this.isPullingConversations) return false;
+		if (!this.isClientRuntime() || this.isPullingConversations) return false;
 		this.isPullingConversations = true;
 
 		try {
@@ -147,7 +154,7 @@ export class ServerStorageSyncService {
 	 * Pushes all current conversations and messages from IndexedDB to the server.
 	 */
 	static async pushConversations(): Promise<boolean> {
-		if (!browser || this.isPushingConversations) return false;
+		if (!this.isClientRuntime() || this.isPushingConversations) return false;
 		// If we haven't pulled yet, don't overwrite server state
 		if (!this.hasPulledConversations) return false;
 
@@ -207,7 +214,7 @@ export class ServerStorageSyncService {
 	 * Pulls settings from the server and hydrates local storage & stores.
 	 */
 	static async pullSettings(): Promise<boolean> {
-		if (!browser || this.isPullingSettings) return false;
+		if (!this.isClientRuntime() || this.isPullingSettings) return false;
 		this.isPullingSettings = true;
 
 		try {
@@ -284,7 +291,7 @@ export class ServerStorageSyncService {
 	 * Pushes current workbench and app settings to the server.
 	 */
 	static async pushSettings(): Promise<boolean> {
-		if (!browser || this.isPushingSettings) return false;
+		if (!this.isClientRuntime() || this.isPushingSettings) return false;
 		if (!this.hasPulledSettings) return false;
 
 		this.isPushingSettings = true;

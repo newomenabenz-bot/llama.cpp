@@ -64,8 +64,14 @@ export function shouldIgnorePath(normalizedPath: string, ignoredPatterns: string
 	if (!normalizedPath || ignoredPatterns.length === 0) return false;
 
 	const segments = normalizedPath.split('/');
-	for (const segment of segments) {
+	for (let i = 0; i < segments.length; i++) {
+		const segment = segments[i];
+		const isLeaf = i === segments.length - 1;
+
 		for (const rawPattern of ignoredPatterns) {
+			const isDirPattern = rawPattern.endsWith('/**') || rawPattern.endsWith('/*');
+			if (isDirPattern && isLeaf) continue;
+
 			// Normalize pattern: strip trailing '/**' or '/*'
 			const pattern = rawPattern.replace(/\/\*\*?$/, '');
 
@@ -124,25 +130,41 @@ function convertToWorkspaceNodes(
 	expandedPaths?: Set<string>
 ): WorkspaceFileNode[] {
 	const result: WorkspaceFileNode[] = [];
+	const seenIds = new Set<string>();
 
 	// Process directory children
 	for (const subDir of dirMap.subdirs.values()) {
+		// Remove any conflicting file with the exact same name
+		if (dirMap.files.has(subDir.name)) {
+			dirMap.files.delete(subDir.name);
+		}
+
 		const children = convertToWorkspaceNodes(subDir, expandedPaths);
 		const isExpanded = expandedPaths ? expandedPaths.has(subDir.path) : false;
-
-		result.push({
-			children,
-			id: subDir.path,
-			isExpanded,
-			name: subDir.name,
-			path: subDir.path,
-			type: 'directory'
-		});
+		const id = `dir:${subDir.path}`;
+		if (!seenIds.has(id)) {
+			seenIds.add(id);
+			result.push({
+				children,
+				id,
+				isExpanded,
+				name: subDir.name,
+				path: subDir.path,
+				type: 'directory'
+			});
+		}
 	}
 
 	// Process file children
 	for (const fileNode of dirMap.files.values()) {
-		result.push(fileNode);
+		const id = `file:${fileNode.path}`;
+		if (!seenIds.has(id)) {
+			seenIds.add(id);
+			result.push({
+				...fileNode,
+				id
+			});
+		}
 	}
 
 	// Sort directories first, then alphabetical
@@ -214,11 +236,14 @@ export function buildFileTree(
 			if (!currentDir.subdirs.has(leafName)) {
 				currentDir.subdirs.set(leafName, createIntermediateDir(leafName, leafPath));
 			}
+			if (currentDir.files.has(leafName)) {
+				currentDir.files.delete(leafName);
+			}
 		} else {
-			if (!currentDir.files.has(leafName)) {
+			if (!currentDir.subdirs.has(leafName) && !currentDir.files.has(leafName)) {
 				currentDir.files.set(leafName, {
 					extension: getFileExtension(leafName),
-					id: leafPath,
+					id: `file:${leafPath}`,
 					name: leafName,
 					path: leafPath,
 					type: 'file'

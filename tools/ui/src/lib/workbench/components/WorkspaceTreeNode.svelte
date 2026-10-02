@@ -105,7 +105,7 @@
 	<!-- Render recursive children if expanded -->
 	{#if isDirectory && isExpanded}
 		{#if node.children && node.children.length > 0}
-			{#each node.children as child (child.id)}
+			{#each node.children as child (child.id || `${child.type}:${child.path}`)}
 				<WorkspaceTreeNode node={child} level={level + 1} />
 			{/each}
 		{:else}
