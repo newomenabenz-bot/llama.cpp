@@ -79,6 +79,17 @@
 	}
 
 	async function handleSubmit() {
+		console.log(
+			'[ChatScreenForm] handleSubmit invoked:',
+			JSON.stringify({
+				message,
+				trimmedLen: message?.trim?.()?.length,
+				disabled,
+				hasLoadingAttachments,
+				modelCheck: chatFormRef?.checkModelSelected?.()
+			})
+		);
+
 		if ((!message.trim() && uploadedFiles.length === 0) || disabled || hasLoadingAttachments)
 			return;
 

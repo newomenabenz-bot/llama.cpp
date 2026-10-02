@@ -19,6 +19,7 @@ import { serverStore } from '$lib/stores/server.svelte';
 // into the stores, and going through it here would read a half-built module
 import { TTLCache } from '$lib/utils/cache-ttl';
 import { detectThinkingSupport } from '$lib/utils/chat-template-thinking-detector';
+import { WorkbenchSettingsService } from '$lib/workbench/settings/workbench-settings.service';
 import { SvelteSet } from 'svelte/reactivity';
 
 /**
@@ -156,7 +157,11 @@ export class ModelPropsManager {
 
 		if (cached) return cached;
 
-		if (serverStore.isRouterMode && !this.host.isModelLoaded(modelId)) {
+		if (
+			WorkbenchSettingsService.getActiveProviderId() === 'gemini' ||
+			modelId?.startsWith('gemini') ||
+			(serverStore.isRouterMode && !this.host.isModelLoaded(modelId))
+		) {
 			return null;
 		}
 
