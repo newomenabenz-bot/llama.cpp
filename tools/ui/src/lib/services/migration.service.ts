@@ -358,11 +358,23 @@ const legacyMessageMigration: Migration = {
 				const firstTurnToolCalls = firstTurn.toolCalls.map((tc, i) => {
 					const existing =
 						existingToolCalls.find((e) => e.function?.name === tc.name) || existingToolCalls[i];
+					const sig =
+						(existing as Record<string, unknown>)?.thought_signature ??
+						(existing as Record<string, unknown>)?.thoughtSignature ??
+						(existing?.function as Record<string, unknown>)?.thought_signature ??
+						(existing?.function as Record<string, unknown>)?.thoughtSignature;
+					const strSig =
+						typeof sig === 'string' && sig.trim().length > 0 ? sig.trim() : undefined;
 
 					return {
-						function: { arguments: tc.args, name: tc.name },
+						function: {
+							arguments: tc.args,
+							name: tc.name,
+							...(strSig ? { thought_signature: strSig, thoughtSignature: strSig } : {})
+						},
 						id: existing?.id || `legacy_tool_${i}`,
-						type: 'function' as const
+						type: 'function' as const,
+						...(strSig ? { thought_signature: strSig, thoughtSignature: strSig } : {})
 					};
 				});
 
@@ -400,11 +412,23 @@ const legacyMessageMigration: Migration = {
 					const turnToolCalls = turn.toolCalls.map((tc, i) => {
 						const idx = toolCallIdCounter + i;
 						const existing = existingToolCalls[idx];
+						const sig =
+							(existing as Record<string, unknown>)?.thought_signature ??
+							(existing as Record<string, unknown>)?.thoughtSignature ??
+							(existing?.function as Record<string, unknown>)?.thought_signature ??
+							(existing?.function as Record<string, unknown>)?.thoughtSignature;
+						const strSig =
+							typeof sig === 'string' && sig.trim().length > 0 ? sig.trim() : undefined;
 
 						return {
-							function: { arguments: tc.args, name: tc.name },
+							function: {
+								arguments: tc.args,
+								name: tc.name,
+								...(strSig ? { thought_signature: strSig, thoughtSignature: strSig } : {})
+							},
 							id: existing?.id || `legacy_tool_${idx}`,
-							type: 'function' as const
+							type: 'function' as const,
+							...(strSig ? { thought_signature: strSig, thoughtSignature: strSig } : {})
 						};
 					});
 

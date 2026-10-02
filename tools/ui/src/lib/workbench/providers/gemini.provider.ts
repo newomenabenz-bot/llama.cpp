@@ -870,7 +870,99 @@ export class GeminiProvider implements IModelProvider, IWorkbenchProvider {
 			let accumulatedContent = '';
 			let accumulatedReasoning = '';
 			const accumulatedToolCalls: ApiChatCompletionToolCall[] = [];
+			let lastSeenThoughtSignature: string | undefined;
 			let usageMetadata: { promptTokenCount?: number; candidatesTokenCount?: number } | null = null;
+
+			const processChunk = (chunk: Record<string, unknown>) => {
+				if (chunk.usageMetadata) {
+					usageMetadata = chunk.usageMetadata as {
+						promptTokenCount?: number;
+						candidatesTokenCount?: number;
+					};
+				}
+
+				const candidates = chunk.candidates;
+				if (Array.isArray(candidates) && candidates.length > 0) {
+					const candidate = candidates[0] as Record<string, unknown>;
+					const content = candidate.content as Record<string, unknown> | undefined;
+					const parts = content?.parts;
+
+					// Extract candidate-level, content-level, or chunk-level thought signature
+					const candSig =
+						(candidate.thought_signature as string | undefined) ??
+						(candidate.thoughtSignature as string | undefined) ??
+						(content?.thought_signature as string | undefined) ??
+						(content?.thoughtSignature as string | undefined) ??
+						(chunk.thought_signature as string | undefined) ??
+						(chunk.thoughtSignature as string | undefined);
+
+					if (typeof candSig === 'string' && candSig.trim().length > 0) {
+						lastSeenThoughtSignature = candSig.trim();
+					}
+
+					if (Array.isArray(parts)) {
+						for (const rawPart of parts) {
+							const part = rawPart as GeminiPart;
+							const partSig =
+								(part as Record<string, unknown>).thought_signature ??
+								(part as Record<string, unknown>).thoughtSignature ??
+								(part.functionCall as Record<string, unknown>)?.thought_signature ??
+								(part.functionCall as Record<string, unknown>)?.thoughtSignature;
+
+							if (typeof partSig === 'string' && partSig.trim().length > 0) {
+								lastSeenThoughtSignature = partSig.trim();
+							}
+
+							// If we found a thought_signature (even on a standalone chunk/part), stitch it into any prior tool calls
+							if (lastSeenThoughtSignature && accumulatedToolCalls.length > 0) {
+								let stitched = false;
+								for (const tc of accumulatedToolCalls) {
+									if (!tc.thought_signature) {
+										tc.thought_signature = lastSeenThoughtSignature;
+										tc.thoughtSignature = lastSeenThoughtSignature;
+										if (tc.function) {
+											tc.function.thought_signature = lastSeenThoughtSignature;
+											tc.function.thoughtSignature = lastSeenThoughtSignature;
+										}
+										stitched = true;
+									}
+								}
+								if (stitched) {
+									options.onToolCallChunk?.(JSON.stringify(accumulatedToolCalls));
+									(options as { onToolCalls?: (calls: ApiChatCompletionToolCall[]) => void }).onToolCalls?.(accumulatedToolCalls);
+								}
+							}
+
+							// Thought / reasoning part
+							if (part.thought === true && typeof part.text === 'string') {
+								accumulatedReasoning += part.text;
+								options.onReasoningChunk?.(part.text);
+							} else if (typeof part.text === 'string') {
+								// Regular content part
+								accumulatedContent += part.text;
+								options.onChunk?.(part.text);
+							} else if (part.functionCall) {
+								// Function call part
+								const toolCallIndex = accumulatedToolCalls.length;
+								const toolCallId = `call_${part.functionCall.name}_${toolCallIndex}`;
+								const sig =
+									(typeof partSig === 'string' && partSig.trim().length > 0 && partSig.trim()) ||
+									(typeof candSig === 'string' && candSig.trim().length > 0 && candSig.trim()) ||
+									lastSeenThoughtSignature;
+
+								const toolCall: ApiChatCompletionToolCall = fromGeminiFunctionCall(
+									part.functionCall,
+									toolCallId,
+									typeof sig === 'string' ? sig : undefined
+								);
+								accumulatedToolCalls.push(toolCall);
+								options.onToolCallChunk?.(JSON.stringify(accumulatedToolCalls));
+								(options as { onToolCalls?: (calls: ApiChatCompletionToolCall[]) => void }).onToolCalls?.(accumulatedToolCalls);
+							}
+						}
+					}
+				}
+			};
 
 			try {
 				while (true) {
@@ -895,47 +987,7 @@ export class GeminiProvider implements IModelProvider, IWorkbenchProvider {
 
 							try {
 								const chunk = JSON.parse(jsonStr);
-
-								if (chunk.usageMetadata) {
-									usageMetadata = chunk.usageMetadata;
-								}
-
-								const candidates = chunk.candidates;
-								if (Array.isArray(candidates) && candidates.length > 0) {
-									const candidate = candidates[0];
-									const parts = candidate.content?.parts;
-
-									if (Array.isArray(parts)) {
-										for (const part of parts) {
-											// Thought / reasoning part
-											if (part.thought === true && typeof part.text === 'string') {
-												accumulatedReasoning += part.text;
-												options.onReasoningChunk?.(part.text);
-											} else if (typeof part.text === 'string') {
-												// Regular content part
-												accumulatedContent += part.text;
-												options.onChunk?.(part.text);
-											} else if (part.functionCall) {
-												// Function call part
-												const toolCallIndex = accumulatedToolCalls.length;
-												const toolCallId = `call_${part.functionCall.name}_${toolCallIndex}`;
-												const sig =
-													(part as Record<string, unknown>).thought_signature ??
-													(part as Record<string, unknown>).thoughtSignature ??
-													(part.functionCall as Record<string, unknown>)?.thought_signature ??
-													(part.functionCall as Record<string, unknown>)?.thoughtSignature;
-												const toolCall: ApiChatCompletionToolCall = fromGeminiFunctionCall(
-													part.functionCall,
-													toolCallId,
-													typeof sig === 'string' ? sig : undefined
-												);
-												accumulatedToolCalls.push(toolCall);
-												options.onToolCallChunk?.(JSON.stringify(accumulatedToolCalls));
-												(options as { onToolCalls?: (calls: ApiChatCompletionToolCall[]) => void }).onToolCalls?.(accumulatedToolCalls);
-											}
-										}
-									}
-								}
+								processChunk(chunk);
 							} catch {
 								// Ignore malformed JSON chunk line
 							}
@@ -949,40 +1001,22 @@ export class GeminiProvider implements IModelProvider, IWorkbenchProvider {
 					if (jsonStr && jsonStr !== '[DONE]') {
 						try {
 							const chunk = JSON.parse(jsonStr);
-							if (chunk.usageMetadata) usageMetadata = chunk.usageMetadata;
-							const candidates = chunk.candidates;
-							if (Array.isArray(candidates) && candidates.length > 0) {
-								const parts = candidates[0].content?.parts;
-								if (Array.isArray(parts)) {
-									for (const part of parts) {
-										if (part.thought === true && typeof part.text === 'string') {
-											accumulatedReasoning += part.text;
-											options.onReasoningChunk?.(part.text);
-										} else if (typeof part.text === 'string') {
-											accumulatedContent += part.text;
-											options.onChunk?.(part.text);
-										} else if (part.functionCall) {
-											const toolCallIndex = accumulatedToolCalls.length;
-											const toolCallId = `call_${part.functionCall.name}_${toolCallIndex}`;
-											const sig =
-												(part as Record<string, unknown>).thought_signature ??
-												(part as Record<string, unknown>).thoughtSignature ??
-												(part.functionCall as Record<string, unknown>)?.thought_signature ??
-												(part.functionCall as Record<string, unknown>)?.thoughtSignature;
-											const toolCall: ApiChatCompletionToolCall = fromGeminiFunctionCall(
-												part.functionCall,
-												toolCallId,
-												typeof sig === 'string' ? sig : undefined
-											);
-											accumulatedToolCalls.push(toolCall);
-											options.onToolCallChunk?.(JSON.stringify(accumulatedToolCalls));
-											(options as { onToolCalls?: (calls: ApiChatCompletionToolCall[]) => void }).onToolCalls?.(accumulatedToolCalls);
-										}
-									}
-								}
-							}
+							processChunk(chunk);
 						} catch {
 							// Ignore flush parse error
+						}
+					}
+				}
+
+				if (lastSeenThoughtSignature) {
+					for (const tc of accumulatedToolCalls) {
+						if (!tc.thought_signature) {
+							tc.thought_signature = lastSeenThoughtSignature;
+							tc.thoughtSignature = lastSeenThoughtSignature;
+							if (tc.function) {
+								tc.function.thought_signature = lastSeenThoughtSignature;
+								tc.function.thoughtSignature = lastSeenThoughtSignature;
+							}
 						}
 					}
 				}
@@ -995,10 +1029,14 @@ export class GeminiProvider implements IModelProvider, IWorkbenchProvider {
 			}
 
 			let timings: ChatMessageTimings | undefined;
-			if (usageMetadata) {
+			const finalUsage = usageMetadata as {
+				promptTokenCount?: number;
+				candidatesTokenCount?: number;
+			} | null;
+			if (finalUsage) {
 				timings = {
-					prompt_n: usageMetadata.promptTokenCount,
-					predicted_n: usageMetadata.candidatesTokenCount
+					prompt_n: finalUsage.promptTokenCount,
+					predicted_n: finalUsage.candidatesTokenCount
 				};
 				options.onTimings?.(timings);
 			}
@@ -1076,7 +1114,29 @@ export class GeminiProvider implements IModelProvider, IWorkbenchProvider {
 			const toolCalls: ApiChatCompletionToolCall[] = [];
 
 			if (data.candidates && data.candidates[0]?.content?.parts) {
-				for (const part of data.candidates[0].content.parts) {
+				const candidate = data.candidates[0] as Record<string, unknown>;
+				const contentObj = candidate.content as Record<string, unknown> | undefined;
+				const candSig =
+					(candidate.thought_signature as string | undefined) ??
+					(candidate.thoughtSignature as string | undefined) ??
+					(contentObj?.thought_signature as string | undefined) ??
+					(contentObj?.thoughtSignature as string | undefined);
+
+				let nonStreamSig: string | undefined =
+					typeof candSig === 'string' && candSig.trim().length > 0 ? candSig.trim() : undefined;
+
+				for (const rawPart of data.candidates[0].content.parts) {
+					const part = rawPart as GeminiPart;
+					const partSig =
+						(part as Record<string, unknown>).thought_signature ??
+						(part as Record<string, unknown>).thoughtSignature ??
+						(part.functionCall as Record<string, unknown>)?.thought_signature ??
+						(part.functionCall as Record<string, unknown>)?.thoughtSignature;
+
+					if (typeof partSig === 'string' && partSig.trim().length > 0) {
+						nonStreamSig = partSig.trim();
+					}
+
 					if (part.thought === true && typeof part.text === 'string') {
 						reasoning += part.text;
 					} else if (typeof part.text === 'string') {
@@ -1085,16 +1145,27 @@ export class GeminiProvider implements IModelProvider, IWorkbenchProvider {
 						const toolCallIndex = toolCalls.length;
 						const toolCallId = `call_${part.functionCall.name}_${toolCallIndex}`;
 						const sig =
-							(part as Record<string, unknown>).thought_signature ??
-							(part as Record<string, unknown>).thoughtSignature ??
-							(part.functionCall as Record<string, unknown>)?.thought_signature ??
-							(part.functionCall as Record<string, unknown>)?.thoughtSignature;
+							(typeof partSig === 'string' && partSig.trim().length > 0 && partSig.trim()) ||
+							nonStreamSig;
 						const toolCall = fromGeminiFunctionCall(
 							part.functionCall,
 							toolCallId,
 							typeof sig === 'string' ? sig : undefined
 						);
 						toolCalls.push(toolCall);
+					}
+				}
+
+				if (nonStreamSig) {
+					for (const tc of toolCalls) {
+						if (!tc.thought_signature) {
+							tc.thought_signature = nonStreamSig;
+							tc.thoughtSignature = nonStreamSig;
+							if (tc.function) {
+								tc.function.thought_signature = nonStreamSig;
+								tc.function.thoughtSignature = nonStreamSig;
+							}
+						}
 					}
 				}
 			}

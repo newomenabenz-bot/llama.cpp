@@ -11,6 +11,7 @@ import {
 	GeminiProvider
 } from '$lib/workbench/providers/gemini.provider';
 import { MessageRole } from '$lib/enums';
+import { agenticStore, toAgenticMessages } from '$lib/stores/agentic/index.svelte';
 import type {
 	ApiChatCompletionToolCall,
 	ApiChatMessageData,
@@ -347,6 +348,240 @@ describe('DIR-GEMINI-THOUGHT-SIG-12: Gemini Thought Signature Preservation', () 
 			expect(receivedCalls).toHaveLength(1);
 			expect(receivedCalls[0].thought_signature).toBe(expectedSignature);
 			expect(receivedCalls[0].function?.thought_signature).toBe(expectedSignature);
+		});
+	});
+
+	describe('5. Split SSE Chunk Stitching & Standalone Signature Delivery', () => {
+		it('stitches standalone thought_signature chunk to preceding functionCall in accumulatedToolCalls', async () => {
+			const expectedSignature = 'split_stream_opaque_thought_sig_chunk_2';
+
+			// Chunk 1 has functionCall without thought_signature
+			// Chunk 2 has standalone thought_signature in parts
+			const splitChunks = [
+				'data: {"candidates":[{"content":{"parts":[{"thought":true,"text":"Thinking..."}]}}]}\n\n',
+				'data: {"candidates":[{"content":{"parts":[{"functionCall":{"name":"default_api:file_glob_search","args":{"pattern":"*.ts"}}}]}}]}\n\n',
+				`data: {"candidates":[{"content":{"parts":[{"thought_signature":"${expectedSignature}"}]}}]}\n\n`,
+				'data: [DONE]\n\n'
+			];
+
+			globalThis.fetch = vi.fn().mockResolvedValueOnce(
+				new Response(createMockSseStream(splitChunks), {
+					status: 200,
+					headers: { 'Content-Type': 'text/event-stream' }
+				})
+			);
+
+			let receivedCalls: ApiChatCompletionToolCall[] = [];
+			let chunkPayloads: string[] = [];
+
+			const options: SettingsChatServiceOptions & {
+				onToolCalls?: (calls: ApiChatCompletionToolCall[]) => void;
+				onToolCallChunk?: (chunk: string) => void;
+			} = {
+				stream: true,
+				onToolCalls: (calls) => {
+					receivedCalls = calls;
+				},
+				onToolCallChunk: (chunk) => {
+					chunkPayloads.push(chunk);
+				}
+			};
+
+			await provider.sendMessage([{ role: MessageRole.USER, content: 'Find files' }], options);
+
+			expect(receivedCalls).toHaveLength(1);
+			expect(receivedCalls[0].function?.name).toBe('default_api:file_glob_search');
+			expect(receivedCalls[0].thought_signature).toBe(expectedSignature);
+			expect(receivedCalls[0].thoughtSignature).toBe(expectedSignature);
+			expect(receivedCalls[0].function?.thought_signature).toBe(expectedSignature);
+
+			// Verify the updated tool call chunk was re-emitted with the signature
+			const lastEmitted = JSON.parse(chunkPayloads[chunkPayloads.length - 1]);
+			expect(lastEmitted[0].thought_signature).toBe(expectedSignature);
+		});
+
+		it('attaches candidate-level thought_signature to functionCall tool calls', async () => {
+			const candSig = 'candidate_level_sig_999';
+
+			const chunks = [
+				`data: {"candidates":[{"thought_signature":"${candSig}","content":{"parts":[{"functionCall":{"name":"default_api:file_glob_search","args":{"pattern":"*.json"}}}]}}]}\n\n`,
+				'data: [DONE]\n\n'
+			];
+
+			globalThis.fetch = vi.fn().mockResolvedValueOnce(
+				new Response(createMockSseStream(chunks), {
+					status: 200,
+					headers: { 'Content-Type': 'text/event-stream' }
+				})
+			);
+
+			let receivedCalls: ApiChatCompletionToolCall[] = [];
+			const candOptions: SettingsChatServiceOptions & {
+				onToolCalls?: (calls: ApiChatCompletionToolCall[]) => void;
+			} = {
+				stream: true,
+				onToolCalls: (calls: ApiChatCompletionToolCall[]) => {
+					receivedCalls = calls;
+				}
+			};
+			await provider.sendMessage(
+				[{ role: MessageRole.USER, content: 'Search' }],
+				candOptions
+			);
+
+			expect(receivedCalls).toHaveLength(1);
+			expect(receivedCalls[0].thought_signature).toBe(candSig);
+			expect(receivedCalls[0].function?.thought_signature).toBe(candSig);
+		});
+	});
+
+	describe('6. Multi-turn History Serialization at Position 9', () => {
+		it('preserves thought_signature at position 9 across 10-turn conversation history', () => {
+			const turn9Signature = 'sig_turn_9_encrypted_glob_search';
+
+			// Simulate 10-turn conversation:
+			// Turn 0: User, Turn 1: Assistant, Turn 2: User, Turn 3: Assistant,
+			// Turn 4: User, Turn 5: Assistant, Turn 6: User, Turn 7: Assistant,
+			// Turn 8: User, Turn 9: Assistant (calls default_api:file_glob_search)
+			const messages: ApiChatMessageData[] = [
+				{ role: MessageRole.USER, content: 'Turn 0: Hello' },
+				{ role: MessageRole.ASSISTANT, content: 'Turn 1: Hi there' },
+				{ role: MessageRole.USER, content: 'Turn 2: What is the weather?' },
+				{ role: MessageRole.ASSISTANT, content: 'Turn 3: Sunny' },
+				{ role: MessageRole.USER, content: 'Turn 4: Tell me a joke' },
+				{ role: MessageRole.ASSISTANT, content: 'Turn 5: Why did the chicken cross the road?' },
+				{ role: MessageRole.USER, content: 'Turn 6: Why?' },
+				{ role: MessageRole.ASSISTANT, content: 'Turn 7: To get to the other side' },
+				{ role: MessageRole.USER, content: 'Turn 8: Search for files in repository' },
+				{
+					role: MessageRole.ASSISTANT,
+					content: '',
+					tool_calls: [
+						{
+							id: 'call_glob_9',
+							type: 'function',
+							function: {
+								name: 'default_api:file_glob_search',
+								arguments: '{"pattern":"*.md"}',
+								thought_signature: turn9Signature
+							},
+							thought_signature: turn9Signature
+						}
+					]
+				},
+				{
+					role: MessageRole.TOOL,
+					tool_call_id: 'call_glob_9',
+					content: '["README.md", "CONTRIBUTING.md"]'
+				}
+			];
+
+			const payload = formatGeminiContents(messages);
+
+			// Verify contents has all turns alternating properly
+			// Index 9 is the model turn containing functionCall default_api:file_glob_search
+			expect(payload.contents[9].role).toBe('model');
+			const pos9Part = payload.contents[9].parts[0];
+
+			expect(pos9Part.functionCall?.name).toBe('default_api:file_glob_search');
+			expect(pos9Part.thought_signature).toBe(turn9Signature);
+			expect(pos9Part.thoughtSignature).toBe(turn9Signature);
+			expect(pos9Part.functionCall?.thought_signature).toBe(turn9Signature);
+			expect(pos9Part.functionCall?.thoughtSignature).toBe(turn9Signature);
+
+			// Verify index 10 is user turn with functionResponse
+			expect(payload.contents[10].role).toBe('user');
+			expect(payload.contents[10].parts[0].functionResponse?.name).toBe('default_api:file_glob_search');
+		});
+
+		it('omits thought_signature when tool call has no signature', () => {
+			const plainMessages: ApiChatMessageData[] = [
+				{ role: MessageRole.USER, content: 'Plain query' },
+				{
+					role: MessageRole.ASSISTANT,
+					content: '',
+					tool_calls: [
+						{
+							id: 'call_plain_0',
+							type: 'function',
+							function: {
+								name: 'default_api:file_glob_search',
+								arguments: '{"pattern":"*.ts"}'
+							}
+						}
+					]
+				},
+				{
+					role: MessageRole.TOOL,
+					tool_call_id: 'call_plain_0',
+					content: '[]'
+				}
+			];
+
+			const payload = formatGeminiContents(plainMessages);
+			const modelTurnPart = payload.contents[1].parts[0];
+
+			expect(modelTurnPart.functionCall?.name).toBe('default_api:file_glob_search');
+			expect(modelTurnPart.thought_signature).toBeUndefined();
+			expect(modelTurnPart.functionCall?.thought_signature).toBeUndefined();
+		});
+	});
+
+	describe('7. Agentic Store Normalization & Conversion Preservation', () => {
+		it('normalizeToolCalls preserves thought_signature on root and function', () => {
+			const inputCalls: ApiChatCompletionToolCall[] = [
+				{
+					id: 'call_agentic_0',
+					type: 'function',
+					function: {
+						name: 'default_api:file_glob_search',
+						arguments: '{"pattern":"*"}',
+						thought_signature: 'agentic_sig_abc_123'
+					},
+					thought_signature: 'agentic_sig_abc_123'
+				}
+			];
+
+			const normalized = agenticStore.normalizeToolCalls(inputCalls);
+			expect(normalized).toHaveLength(1);
+			expect(normalized[0].thought_signature).toBe('agentic_sig_abc_123');
+			expect(normalized[0].thoughtSignature).toBe('agentic_sig_abc_123');
+			expect(normalized[0].function.thought_signature).toBe('agentic_sig_abc_123');
+			expect(normalized[0].function.thoughtSignature).toBe('agentic_sig_abc_123');
+		});
+
+		it('toAgenticMessages preserves thought_signature when hydrating messages from database', () => {
+			const apiMessages: ApiChatMessageData[] = [
+				{
+					role: MessageRole.ASSISTANT,
+					content: '',
+					tool_calls: [
+						{
+							id: 'call_hydrate_0',
+							type: 'function',
+							function: {
+								name: 'default_api:file_glob_search',
+								arguments: '{"pattern":"*"}',
+								thought_signature: 'hydrate_sig_def_456'
+							},
+							thought_signature: 'hydrate_sig_def_456'
+						}
+					]
+				}
+			];
+
+			const agenticMsgs = toAgenticMessages(apiMessages);
+			expect(agenticMsgs).toHaveLength(1);
+			const assistantMsg = agenticMsgs[0];
+			if ('tool_calls' in assistantMsg && assistantMsg.tool_calls) {
+				expect(assistantMsg.tool_calls).toHaveLength(1);
+				expect(assistantMsg.tool_calls[0].thought_signature).toBe('hydrate_sig_def_456');
+				expect(assistantMsg.tool_calls[0].thoughtSignature).toBe('hydrate_sig_def_456');
+				expect(assistantMsg.tool_calls[0].function.thought_signature).toBe('hydrate_sig_def_456');
+				expect(assistantMsg.tool_calls[0].function.thoughtSignature).toBe('hydrate_sig_def_456');
+			} else {
+				throw new Error('Expected assistant message with tool_calls');
+			}
 		});
 	});
 });

@@ -35,7 +35,11 @@ export type AgenticToolCallPayload = {
 	function: {
 		name: string;
 		arguments: string;
+		thought_signature?: string;
+		thoughtSignature?: string;
 	};
+	thought_signature?: string;
+	thoughtSignature?: string;
 };
 
 /**

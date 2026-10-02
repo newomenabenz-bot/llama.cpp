@@ -98,7 +98,7 @@ function createDefaultSession(): AgenticSession {
 	};
 }
 
-function toAgenticMessages(messages: ApiChatMessageData[]): AgenticMessage[] {
+export function toAgenticMessages(messages: ApiChatMessageData[]): AgenticMessage[] {
 	return messages.map((message) => {
 		if (
 			message.role === MessageRole.ASSISTANT &&
@@ -109,14 +109,26 @@ function toAgenticMessages(messages: ApiChatMessageData[]): AgenticMessage[] {
 				content: message.content,
 				reasoning_content: message.reasoning_content,
 				role: MessageRole.ASSISTANT,
-				tool_calls: message.tool_calls.map((call, index) => ({
-					function: {
-						arguments: call.function?.arguments ?? '',
-						name: call.function?.name ?? ''
-					},
-					id: call.id ?? `call_${index}`,
-					type: (call.type as ToolCallType.FUNCTION) ?? ToolCallType.FUNCTION
-				}))
+				tool_calls: message.tool_calls.map((call, index) => {
+					const sig =
+						(call as Record<string, unknown>)?.thought_signature ??
+						(call as Record<string, unknown>)?.thoughtSignature ??
+						(call?.function as Record<string, unknown>)?.thought_signature ??
+						(call?.function as Record<string, unknown>)?.thoughtSignature;
+					const strSig =
+						typeof sig === 'string' && sig.trim().length > 0 ? sig.trim() : undefined;
+
+					return {
+						function: {
+							arguments: call.function?.arguments ?? '',
+							name: call.function?.name ?? '',
+							...(strSig ? { thought_signature: strSig, thoughtSignature: strSig } : {})
+						},
+						id: call.id ?? `call_${index}`,
+						type: (call.type as ToolCallType.FUNCTION) ?? ToolCallType.FUNCTION,
+						...(strSig ? { thought_signature: strSig, thoughtSignature: strSig } : {})
+					};
+				})
 			} satisfies AgenticMessage;
 		}
 
@@ -1145,17 +1157,29 @@ class AgenticStore {
 		return { attachments, cleanedResult: cleanedLines.join(NEWLINE) };
 	}
 
-	private normalizeToolCalls(toolCalls: ApiChatCompletionToolCall[]): AgenticToolCallList {
+	normalizeToolCalls(toolCalls: ApiChatCompletionToolCall[]): AgenticToolCallList {
 		if (!toolCalls) return [];
 
-		return toolCalls.map((call, index) => ({
-			function: {
-				arguments: call?.function?.arguments ?? '',
-				name: call?.function?.name ?? ''
-			},
-			id: call?.id ?? `tool_${index}`,
-			type: (call?.type as ToolCallType.FUNCTION) ?? ToolCallType.FUNCTION
-		}));
+		return toolCalls.map((call, index) => {
+			const sig =
+				(call as Record<string, unknown>)?.thought_signature ??
+				(call as Record<string, unknown>)?.thoughtSignature ??
+				(call?.function as Record<string, unknown>)?.thought_signature ??
+				(call?.function as Record<string, unknown>)?.thoughtSignature;
+			const strSig =
+				typeof sig === 'string' && sig.trim().length > 0 ? sig.trim() : undefined;
+
+			return {
+				function: {
+					arguments: call?.function?.arguments ?? '',
+					name: call?.function?.name ?? '',
+					...(strSig ? { thought_signature: strSig, thoughtSignature: strSig } : {})
+				},
+				id: call?.id ?? `tool_${index}`,
+				type: (call?.type as ToolCallType.FUNCTION) ?? ToolCallType.FUNCTION,
+				...(strSig ? { thought_signature: strSig, thoughtSignature: strSig } : {})
+			};
+		});
 	}
 
 	private parseToolArguments(args: string | Record<string, unknown>): Record<string, unknown> {
