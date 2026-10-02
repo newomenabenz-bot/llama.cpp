@@ -61,9 +61,9 @@
 		};
 	});
 	let hasLoadingAttachments = $derived(uploadedFiles.some((f) => f.isLoading));
-	let message = $derived(initialMessage);
-	let previousIsLoading = $derived(isLoading);
-	let previousInitialMessage = $derived(initialMessage);
+	let message = $state('');
+	let previousIsLoading = $state(false);
+	let previousInitialMessage = $state('');
 
 	const { clearDraft } = useDraftMessages({
 		getChatId: () => chatId,
