@@ -36,6 +36,7 @@
 		settingsStore,
 		toolsStore
 	} from '$lib/stores';
+	import { WorkbenchSettingsService } from '$lib/workbench/settings/workbench-settings.service';
 	import type {
 		FileMentionEntry,
 		GetPromptResult,
@@ -203,14 +204,21 @@
 		return Number.isNaN(n) ? Number(SETTING_CONFIG_DEFAULT.pasteLongTextToFileLen) : n;
 	});
 
-	let isRouter = $derived(serverStore.isRouterMode);
+	let isGemini = $derived(WorkbenchSettingsService.getActiveProviderId() === 'gemini');
+	let isRouter = $derived(serverStore.isRouterMode && !isGemini);
 	let conversationModel = $derived(
 		getConversationModel(conversationsStore.activeMessages as DatabaseMessage[])
 	);
 	let activeModelId = $derived(modelsStore.activeModelId);
 
 	let hasModelSelected = $derived(
-		!isRouter || !!conversationModel || !!modelsStore.selectedModelId
+		isGemini
+			? Boolean(
+					modelsStore.selectedModelName ||
+					WorkbenchSettingsService.getSelectedGeminiModel() ||
+					WorkbenchSettingsService.getGeminiModel()
+			  )
+			: !isRouter || !!conversationModel || !!modelsStore.selectedModelId
 	);
 	let hasLoadingAttachments = $derived(uploadedFiles.some((f) => f.isLoading));
 	let hasAttachments = $derived(
