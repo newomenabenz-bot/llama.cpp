@@ -3,8 +3,10 @@
 	import * as Alert from '$lib/components/ui/alert';
 	import { ICON_CLASS_DEFAULT } from '$lib/constants';
 	import { serverStore } from '$lib/stores';
+	import { WorkbenchSettingsService } from '$lib/workbench/settings/workbench-settings.service';
 
-	let hasError = $derived(!!serverStore.error);
+	let activeProvider = $derived(WorkbenchSettingsService.getActiveProviderId());
+	let hasError = $derived(activeProvider === 'llama-server' && !!serverStore.error);
 	let isLoadingModel = $derived(serverStore.status === 503);
 </script>
 

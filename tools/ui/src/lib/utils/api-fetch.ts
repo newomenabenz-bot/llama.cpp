@@ -36,6 +36,11 @@ export interface ApiFetchOptions extends Omit<RequestInit, 'headers'> {
 	 * Additional headers to merge with default headers.
 	 */
 	headers?: Record<string, string>;
+	/**
+	 * Request timeout in milliseconds.
+	 * Default: 4000ms
+	 */
+	timeout?: number;
 }
 
 /**
@@ -52,28 +57,71 @@ export interface ApiFetchOptions extends Omit<RequestInit, 'headers'> {
  * const models = await apiFetch<ApiModelListResponse>('/v1/models');
  *
  * // POST request
- * const result = await apiFetch<ApiResponse>('/models/load', {
+ * const result = await apiPost<ApiResponse>('/models/load', {
  *   method: 'POST',
  *   body: JSON.stringify({ model: 'gpt-4' })
  * });
  * ```
  */
 export async function apiFetch<T>(path: string, options: ApiFetchOptions = {}): Promise<T> {
-	const { authOnly = false, headers: customHeaders, ...fetchOptions } = options;
+	const {
+		authOnly = false,
+		headers: customHeaders,
+		timeout = 4000,
+		signal: customSignal,
+		...fetchOptions
+	} = options;
 	const baseHeaders = authOnly ? getAuthHeaders() : getJsonHeaders();
 	const headers = { ...baseHeaders, ...customHeaders };
 	// absolute URLs with an allowed protocol pass through untouched; relative paths get the base prefix
 	const url = API_ABSOLUTE_URL_PROTOCOLS.some((p) => path.startsWith(p)) ? path : `${base}${path}`;
+
+	let signal: AbortSignal | undefined;
+	let cleanup = () => {};
+
+	if (timeout > 0) {
+		if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function' && !customSignal) {
+			signal = AbortSignal.timeout(timeout);
+		} else {
+			const controller = new AbortController();
+			const timer = setTimeout(() => {
+				controller.abort(new DOMException('Request timed out', 'TimeoutError'));
+			}, timeout);
+			cleanup = () => clearTimeout(timer);
+
+			if (customSignal) {
+				if (customSignal.aborted) {
+					clearTimeout(timer);
+					controller.abort(customSignal.reason);
+				} else {
+					customSignal.addEventListener(
+						'abort',
+						() => {
+							clearTimeout(timer);
+							controller.abort(customSignal.reason);
+						},
+						{ once: true }
+					);
+				}
+			}
+			signal = controller.signal;
+		}
+	} else if (customSignal) {
+		signal = customSignal;
+	}
 
 	let response;
 
 	try {
 		response = await fetch(url, {
 			...fetchOptions,
-			headers
+			headers,
+			signal
 		});
 	} catch (e) {
 		throw new Error(beautifyNetworkError(e));
+	} finally {
+		cleanup();
 	}
 
 	if (!response.ok) {
@@ -180,6 +228,13 @@ function beautifyNetworkError(throwable: unknown): string {
 	if (throwable instanceof Error) {
 		message = throwable.message;
 
+		if (
+			throwable.name === 'TimeoutError' ||
+			(throwable.name === 'AbortError' && message.toLowerCase().includes('time'))
+		) {
+			return ERROR_MESSAGES.NETWORK.TIMEOUT;
+		}
+
 		if (throwable.name === 'TypeError' && message.includes('fetch')) {
 			return ERROR_MESSAGES.NETWORK.UNREACHABLE;
 		}
@@ -187,11 +242,17 @@ function beautifyNetworkError(throwable: unknown): string {
 		message = String(throwable);
 	}
 
-	if (message.includes('ECONNREFUSED')) {
+	const lower = message.toLowerCase();
+	if (lower.includes('econnrefused')) {
 		return ERROR_MESSAGES.NETWORK.REFUSED;
-	} else if (message.includes('ENOTFOUND')) {
+	} else if (lower.includes('enotfound')) {
 		return ERROR_MESSAGES.NETWORK.NXDOMAIN;
-	} else if (message.includes('ETIMEDOUT')) {
+	} else if (
+		lower.includes('etimedout') ||
+		lower.includes('timed out') ||
+		lower.includes('timeouterror') ||
+		lower.includes('timeout')
+	) {
 		return ERROR_MESSAGES.NETWORK.TIMEOUT;
 	}
 

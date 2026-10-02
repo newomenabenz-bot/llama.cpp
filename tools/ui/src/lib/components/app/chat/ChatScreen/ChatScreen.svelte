@@ -53,7 +53,6 @@
 	);
 	let activeErrorDialog = $derived(chatStore.errorDialogState);
 	let isServerLoading = $derived(serverStore.loading);
-	let hasPropsError = $derived(!!serverStore.error);
 	let isCurrentConversationLoading = $derived(chatStore.isLoading || chatStore.isStreaming());
 	let chatFormBottomPosition = $derived.by(() => {
 		if (!deviceStore.isMobile) return '1rem';
@@ -82,6 +81,8 @@
 		void settingsRevision;
 		return WorkbenchSettingsService.getActiveProviderId();
 	});
+
+	let hasPropsError = $derived(activeProvider === 'llama-server' && !!serverStore.error);
 
 	let activeModelDisplay = $derived.by(() => {
 		void settingsRevision;

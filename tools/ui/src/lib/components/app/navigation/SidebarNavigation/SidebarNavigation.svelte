@@ -99,6 +99,16 @@
 	let renameDraft = $state('');
 	let renameOriginalTitle = $state('');
 
+	$effect(() => {
+		const handleOpenSettings = () => {
+			settingsDialogOpen = true;
+		};
+		window.addEventListener('open-settings', handleOpenSettings);
+		return () => {
+			window.removeEventListener('open-settings', handleOpenSettings);
+		};
+	});
+
 	const renderedOrderIds = $derived(
 		buildConversationTree(filteredConversations).map((t) => t.conversation.id)
 	);

@@ -63,8 +63,16 @@ class ServerStore {
 
 		this.clearRetryTimer();
 
+		let loadingTimer: ReturnType<typeof setTimeout> | null = null;
 		if (!background) {
 			this.loading = true;
+			// Guarantee this.loading resets within 3000ms max to prevent UI lockout
+			loadingTimer = setTimeout(() => {
+				if (this.loading) {
+					console.warn('[serverStore] Fetch exceeded 3000ms; releasing splash loading gate');
+					this.loading = false;
+				}
+			}, 3000);
 		}
 
 		// Don't clear an existing "still loading" error before a retry -
@@ -90,6 +98,10 @@ class ServerStore {
 					this.scheduleRetry();
 				}
 			} finally {
+				if (loadingTimer) {
+					clearTimeout(loadingTimer);
+					loadingTimer = null;
+				}
 				if (!background) {
 					this.loading = false;
 				}
@@ -110,11 +122,38 @@ class ServerStore {
 	}
 
 	private detectRole(props: ApiLlamaCppServerProps): void {
-		const newRole = props?.role === ServerRole.ROUTER ? ServerRole.ROUTER : ServerRole.MODEL;
+		const isRouter =
+			props?.role === ServerRole.ROUTER ||
+			(props as unknown as { role?: string })?.role === 'router';
+		const newRole = isRouter ? ServerRole.ROUTER : ServerRole.MODEL;
 
 		if (this.role !== newRole) {
 			this.role = newRole;
 			console.info(`Server running in ${newRole === ServerRole.ROUTER ? 'ROUTER' : 'MODEL'} mode`);
+		}
+
+		if (isRouter) {
+			// If role is router (including router mode with data: []), set default router properties and mark connection ready
+			if (!this.props) {
+				this.props = props;
+			}
+			if (this.props) {
+				if (!this.props.default_generation_settings) {
+					this.props.default_generation_settings = {
+						n_ctx: 4096,
+						params: {} as ApiLlamaCppServerProps['default_generation_settings']['params']
+					} as ApiLlamaCppServerProps['default_generation_settings'];
+				}
+				if (!this.props.modalities) {
+					this.props.modalities = {
+						vision: false,
+						audio: false,
+						video: false
+					};
+				}
+			}
+			this.error = null;
+			this.status = null;
 		}
 	}
 

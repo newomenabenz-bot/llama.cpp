@@ -201,6 +201,14 @@ class ModelsStore implements ModelPropsHost, ModelStatusHost {
 	async fetch(force = false): Promise<void> {
 		if (this.inflightFetch) return this.inflightFetch;
 
+		if (WorkbenchSettingsService.getActiveProviderId() === 'gemini') {
+			const cached = WorkbenchSettingsService.getCachedGeminiModels();
+			if (cached && cached.length > 0) {
+				this.syncGeminiModels(cached);
+				if (!force) return;
+			}
+		}
+
 		if (this.models.length > 0 && !force) return;
 
 		this.inflightFetch = this.runFetch();
@@ -222,7 +230,10 @@ class ModelsStore implements ModelPropsHost, ModelStatusHost {
 		try {
 			const response = await ModelsService.listRouter();
 
-			this.routerModels = response.data;
+			this.routerModels = response.data || [];
+			if (!response.data || response.data.length === 0) {
+				return;
+			}
 			await this.props.fetchModalitiesForLoadedModels();
 
 			const visible = this.getVisibleModels();
@@ -515,8 +526,20 @@ class ModelsStore implements ModelPropsHost, ModelStatusHost {
 			if (router) {
 				const response = await ModelsService.listRouter();
 
-				this.routerModels = response.data;
+				this.routerModels = response.data || [];
 				this.models = this.buildModelOptions(response);
+
+				// When router mode has no models (response.data is empty), immediately finish loading
+				// and do not attempt to query modalities for non-existent models
+				if (!response.data || response.data.length === 0) {
+					if (WorkbenchSettingsService.getActiveProviderId() === 'gemini') {
+						const cached = WorkbenchSettingsService.getCachedGeminiModels();
+						if (cached && cached.length > 0) {
+							this.syncGeminiModels(cached);
+						}
+					}
+					return;
+				}
 
 				await this.props.fetchModalitiesForLoadedModels();
 
@@ -529,6 +552,14 @@ class ModelsStore implements ModelPropsHost, ModelStatusHost {
 				this.models = await this.fetchModelModeInternal();
 			}
 		} catch (error) {
+			if (WorkbenchSettingsService.getActiveProviderId() === 'gemini') {
+				const cached = WorkbenchSettingsService.getCachedGeminiModels();
+				if (cached && cached.length > 0) {
+					this.syncGeminiModels(cached);
+					this.error = null;
+					return;
+				}
+			}
 			this.models = [];
 			this.error = error instanceof Error ? error.message : 'Failed to load models';
 
