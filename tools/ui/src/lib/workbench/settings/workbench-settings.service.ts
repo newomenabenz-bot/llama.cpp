@@ -435,7 +435,6 @@ export class WorkbenchSettingsService {
 	 */
 	static subscribe(listener: SettingsListener): () => void {
 		this.listeners.add(listener);
-		listener(this.getAllSettings());
 
 		return () => {
 			this.listeners.delete(listener);

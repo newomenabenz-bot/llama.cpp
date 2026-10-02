@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { Snippet } from 'svelte';
+	import { untrack, type Snippet } from 'svelte';
 	import {
 		Activity,
 		Code2,
@@ -142,7 +142,9 @@
 
 	$effect(() => {
 		const unsubscribe = WorkbenchSettingsService.subscribe(() => {
-			settingsRevision += 1;
+			untrack(() => {
+				settingsRevision += 1;
+			});
 		});
 		return unsubscribe;
 	});

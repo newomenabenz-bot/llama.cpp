@@ -32,7 +32,7 @@
 	import { WorkbenchSettingsService } from '$lib/workbench/settings/workbench-settings.service';
 	import { workbenchShellStore } from '$lib/workbench/shell/shell.svelte';
 	import { parseFilesToMessageExtras } from '$lib/utils/browser-only';
-	import { onDestroy, onMount, tick } from 'svelte';
+	import { onDestroy, onMount, tick, untrack } from 'svelte';
 
 	let { showCenteredEmpty = false } = $props();
 
@@ -72,7 +72,9 @@
 
 	$effect(() => {
 		const unsubscribe = WorkbenchSettingsService.subscribe(() => {
-			settingsRevision += 1;
+			untrack(() => {
+				settingsRevision += 1;
+			});
 		});
 		return unsubscribe;
 	});

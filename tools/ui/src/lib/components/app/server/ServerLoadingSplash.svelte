@@ -18,9 +18,20 @@
 	onMount(() => {
 		const timer = setTimeout(() => {
 			showFallback = true;
-		}, 3000);
+		}, 2500);
 
-		return () => clearTimeout(timer);
+		// Hard safety release: ensure loading screen never locks the user out permanently
+		const hardReleaseTimer = setTimeout(() => {
+			if (serverStore.loading) {
+				console.warn('[ServerLoadingSplash] Safety timeout reached (6s); releasing splash screen');
+				serverStore.loading = false;
+			}
+		}, 6000);
+
+		return () => {
+			clearTimeout(timer);
+			clearTimeout(hardReleaseTimer);
+		};
 	});
 
 	function handleContinue() {
