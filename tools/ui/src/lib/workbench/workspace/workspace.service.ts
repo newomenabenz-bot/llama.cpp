@@ -25,7 +25,7 @@ export class WorkbenchWorkspaceService {
 	 * @param signal - Optional abort signal
 	 */
 	static async fetchWorkspaceFiles(
-		rootPath: string = '.',
+		rootPath: string = '/home/ubuntu',
 		filter?: Partial<WorkspaceFilterConfig>,
 		signal?: AbortSignal
 	): Promise<string[]> {
@@ -35,7 +35,10 @@ export class WorkbenchWorkspaceService {
 			maxFiles: filter?.maxFiles ?? DEFAULT_WORKSPACE_FILTER_CONFIG.maxFiles
 		};
 
-		const normalizedRoot = normalizeWorkspacePath(rootPath) || '.';
+		const normalizedRoot =
+			rootPath && rootPath.startsWith('/')
+				? rootPath.replace(/\\/g, '/').replace(/\/+/g, '/').replace(/\/$/, '') || '/home/ubuntu'
+				: normalizeWorkspacePath(rootPath) || (rootPath === '.' ? '.' : '/home/ubuntu');
 
 		try {
 			const rawResult = await ToolsService.executeToolRaw(

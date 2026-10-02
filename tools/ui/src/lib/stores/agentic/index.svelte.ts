@@ -807,7 +807,9 @@ class AgenticStore {
 				const toolName = toolCall.function.name;
 				const serverLabel = toolsStore.getToolServerLabel(toolName);
 				const parsedArgs = this.parseToolArguments(toolCall.function.arguments);
-				const cwd = conversationsStore.activeConversation?.cwd;
+				const cwd =
+					conversationsStore.activeConversation?.cwd ||
+					WorkbenchSettingsService.getWorkspaceRoot();
 
 				// Pre-evaluate tool execution through Workbench Security Policy Bridge
 				const securityEval = WorkbenchSecurityBridge.evaluateToolCall(
@@ -927,7 +929,7 @@ class AgenticStore {
 										vision: modelsStore.props.modelSupportsVision(effectiveModel)
 									},
 									signal,
-									conversationsStore.activeConversation?.cwd
+									cwd
 								);
 							} else {
 								executionResult = await SandboxService.executeTool(toolName, args, signal);

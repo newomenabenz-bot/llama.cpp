@@ -270,12 +270,12 @@ class ConversationsStore implements ConversationsPreferencesHost {
 		// threaded in here too, then cleared so it doesn't bleed onto subsequent
 		// new chats.
 		const conversation = await DatabaseService.createConversation(conversationName, {
-			cwd: this.preferences.pendingCwd ?? undefined,
+			cwd: this.preferences.pendingCwd ?? '/home/ubuntu',
 			reasoningEffort: this.preferences.pendingReasoningEffort,
 			...this.preferences.getToolPolicySnapshot()
 		});
 
-		this.preferences.pendingCwd = null;
+		this.preferences.pendingCwd = '/home/ubuntu';
 
 		this.conversations = [conversation, ...this.conversations];
 		this.activeConversation = conversation;
@@ -526,9 +526,9 @@ class ConversationsStore implements ConversationsPreferencesHost {
 				return false;
 			}
 
-			// Drop any cwd the user drafted on the empty new-chat screen -
-			// it doesn't belong to this conversation.
-			this.preferences.pendingCwd = null;
+			// Drop any custom cwd the user drafted on the empty new-chat screen -
+			// reset to default /home/ubuntu.
+			this.preferences.pendingCwd = '/home/ubuntu';
 
 			const allMessages = await DatabaseService.getConversationMessages(convId);
 

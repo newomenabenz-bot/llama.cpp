@@ -21,7 +21,7 @@ import {
 import { WorkbenchWorkspaceService } from './workspace.service';
 
 export class WorkspaceStore {
-	rootPath = $state<string>('.');
+	rootPath = $state<string>('/home/ubuntu');
 	tree = $state<WorkspaceFileNode[]>([]);
 	flatPaths = $state<string[]>([]);
 	selectedPath = $state<string | null>(null);
@@ -65,7 +65,12 @@ export class WorkspaceStore {
 	 * Sets the active workspace root directory.
 	 */
 	setRoot(newRoot: string): void {
-		const normalized = normalizeWorkspacePath(newRoot) || '.';
+		let normalized: string;
+		if (newRoot && newRoot.startsWith('/')) {
+			normalized = newRoot.replace(/\\/g, '/').replace(/\/+/g, '/').replace(/\/$/, '') || '/home/ubuntu';
+		} else {
+			normalized = normalizeWorkspacePath(newRoot) || '/home/ubuntu';
+		}
 		if (this.rootPath !== normalized) {
 			this.rootPath = normalized;
 			this.selectedPath = null;
@@ -227,7 +232,7 @@ export class WorkspaceStore {
 	 * Resets store to initial empty state.
 	 */
 	reset(): void {
-		this.rootPath = '.';
+		this.rootPath = '/home/ubuntu';
 		this.tree = [];
 		this.flatPaths = [];
 		this.selectedPath = null;

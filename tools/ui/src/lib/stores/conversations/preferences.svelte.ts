@@ -82,7 +82,7 @@ export class ConversationPreferences {
 	 * Cleared by `loadConversation` and `clearActiveConversation` so a
 	 * stale pick can't bleed onto an unrelated chat.
 	 */
-	pendingCwd = $state<string | null>(null);
+	pendingCwd = $state<string | null>('/home/ubuntu');
 
 	/** Global (non-conversation-specific) reasoning effort default */
 	pendingReasoningEffort = $state<ReasoningEffort>(loadReasoningEffortDefault());
@@ -203,7 +203,7 @@ export class ConversationPreferences {
 	/** Reload persisted defaults, e.g. when the active conversation is cleared. */
 	resetPending(): void {
 		this.pendingReasoningEffort = loadReasoningEffortDefault();
-		this.pendingCwd = null;
+		this.pendingCwd = '/home/ubuntu';
 	}
 
 	// Working Directory

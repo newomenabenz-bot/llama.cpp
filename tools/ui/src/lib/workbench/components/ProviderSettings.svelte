@@ -34,7 +34,9 @@
 		WorkbenchSettingsService.getSelectedGeminiModel() || WorkbenchSettingsService.getGeminiModel()
 	);
 	let executionMode = $state<ExecutionMode>(WorkbenchSettingsService.getExecutionMode());
-	let workspaceRoot = $state<string>(WorkbenchSettingsService.getWorkspaceRoot());
+	let workspaceRoot = $state<string>(
+		WorkbenchSettingsService.getWorkspaceRoot() || '/home/ubuntu'
+	);
 	let showApiKey = $state<boolean>(false);
 	let saveNotice = $state<boolean>(false);
 
@@ -75,7 +77,15 @@
 			selectedModel = savedModel;
 		}
 
-		// 3. If an API key is present but no cache exists, run verification automatically in the background
+		// 3. Ensure workspaceRoot binds to /home/ubuntu if empty
+		const currentRoot = WorkbenchSettingsService.getWorkspaceRoot();
+		if (currentRoot) {
+			workspaceRoot = currentRoot;
+		} else {
+			workspaceRoot = '/home/ubuntu';
+		}
+
+		// 4. If an API key is present but no cache exists, run verification automatically in the background
 		if (apiKey.trim() && (!cached || cached.length === 0)) {
 			void handleCheckConnection();
 		}
@@ -205,8 +215,8 @@
 	}
 
 	function resetWorkspaceRoot() {
-		WorkbenchSettingsService.setWorkspaceRoot('');
-		workspaceRoot = WorkbenchSettingsService.getWorkspaceRoot();
+		WorkbenchSettingsService.setWorkspaceRoot('/home/ubuntu');
+		workspaceRoot = '/home/ubuntu';
 		showSaveFeedback();
 	}
 
@@ -614,14 +624,14 @@
 			<Input
 				id="workbench-workspace-root"
 				type="text"
-				placeholder="Default working directory"
-				value={workspaceRoot}
+				placeholder="/home/ubuntu"
+				value={workspaceRoot || '/home/ubuntu'}
 				oninput={handleWorkspaceRootInput}
 				class="font-mono text-xs"
 			/>
 
 			<p class="text-[11px] text-muted-foreground">
-				All filesystem operations and path validations are strictly sandboxed within this root directory across all execution modes.
+				All filesystem operations and path validations are strictly sandboxed within this root directory across all execution modes (defaults to /home/ubuntu).
 			</p>
 		</div>
 

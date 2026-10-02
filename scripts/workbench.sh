@@ -50,7 +50,7 @@ WORKBENCH_N_THREADS="${WORKBENCH_N_THREADS:-4}"
 WORKBENCH_N_GPU_LAYERS="${WORKBENCH_N_GPU_LAYERS:-0}"
 WORKBENCH_PUBLIC_DIR="$(resolve_path "${WORKBENCH_PUBLIC_DIR:-$APP_ROOT/public}")"
 WORKBENCH_DATA_DIR="$(resolve_path "${WORKBENCH_DATA_DIR:-$APP_ROOT/data}")"
-WORKBENCH_WORKSPACE_DIR="$(resolve_path "${WORKBENCH_WORKSPACE_DIR:-$APP_ROOT/data/workspace}")"
+WORKBENCH_WORKSPACE_DIR="$(resolve_path "${WORKBENCH_WORKSPACE_DIR:-/home/ubuntu}")"
 WORKBENCH_LOG_FILE="$(resolve_path "${WORKBENCH_LOG_FILE:-$APP_ROOT/data/logs/workbench.log}")"
 WORKBENCH_PID_FILE="$(resolve_path "${WORKBENCH_PID_FILE:-$APP_ROOT/data/workbench.pid}")"
 WORKBENCH_API_KEY="${WORKBENCH_API_KEY:-}"
@@ -76,9 +76,11 @@ check_port_in_use() {
 
 ensure_directories() {
 	mkdir -p "$WORKBENCH_DATA_DIR" \
-		"$WORKBENCH_WORKSPACE_DIR" \
 		"$(dirname "$WORKBENCH_LOG_FILE")" \
 		"$(dirname "$WORKBENCH_PID_FILE")"
+	if [ -n "$WORKBENCH_WORKSPACE_DIR" ]; then
+		mkdir -p "$WORKBENCH_WORKSPACE_DIR" 2>/dev/null || true
+	fi
 }
 
 is_running() {
@@ -141,6 +143,17 @@ do_start() {
 	args+=(--tools "${WORKBENCH_ENABLE_TOOLS:-all}" --jinja)
 
 	echo "[INFO] Starting Llama Workbench on http://${WORKBENCH_HOST}:${WORKBENCH_PORT}..."
+
+	# Permanently root workspace execution to /home/ubuntu (DIR-ROOT-WORKSPACE-17)
+	local run_workspace="${WORKBENCH_WORKSPACE_DIR:-/home/ubuntu}"
+	if [ -d "$run_workspace" ]; then
+		cd "$run_workspace"
+	else
+		mkdir -p "$run_workspace" 2>/dev/null || true
+		cd "$run_workspace" 2>/dev/null || cd /home/ubuntu 2>/dev/null || true
+	fi
+	echo "[INFO] Workbench process working directory rooted at: $(pwd)"
+
 	nohup "$SERVER_BIN" "${args[@]}" >> "$WORKBENCH_LOG_FILE" 2>&1 &
 	local pid=$!
 	echo "$pid" > "$WORKBENCH_PID_FILE"

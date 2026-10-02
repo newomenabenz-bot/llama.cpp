@@ -140,6 +140,13 @@ echo "  Native llama-server binary successfully built: $SERVER_BINARY"
 echo "[4/6] Assembling standalone distribution package..."
 RELEASE_ROOT="$REPO_ROOT/dist-release/llama-workbench"
 
+# Preserve existing runtime configuration if present (DIR-ROOT-WORKSPACE-17)
+TEMP_ENV_BACKUP=""
+if [ -f "$RELEASE_ROOT/workbench.env" ]; then
+	TEMP_ENV_BACKUP="$(mktemp 2>/dev/null || echo "/tmp/workbench.env.bak.$$")"
+	cp "$RELEASE_ROOT/workbench.env" "$TEMP_ENV_BACKUP"
+fi
+
 rm -rf "$RELEASE_ROOT"
 mkdir -p "$RELEASE_ROOT/bin"
 mkdir -p "$RELEASE_ROOT/scripts"
@@ -169,6 +176,16 @@ echo "  Public Web UI assets verified: $(find "$RELEASE_ROOT/public" -type f | w
 
 # Copy environment template
 cp "$REPO_ROOT/workbench.env.example" "$RELEASE_ROOT/workbench.env.example"
+
+# Restore preserved workbench.env or initialize from example ensuring /home/ubuntu root
+if [ -n "$TEMP_ENV_BACKUP" ] && [ -f "$TEMP_ENV_BACKUP" ]; then
+	cp "$TEMP_ENV_BACKUP" "$RELEASE_ROOT/workbench.env"
+	rm -f "$TEMP_ENV_BACKUP"
+	echo "  Preserved and restored existing runtime configuration in workbench.env."
+else
+	cp "$REPO_ROOT/workbench.env.example" "$RELEASE_ROOT/workbench.env"
+	echo "  Initialized default workbench.env rooted at /home/ubuntu."
+fi
 
 # Generate distribution README
 cat << 'EOF' > "$RELEASE_ROOT/README.md"

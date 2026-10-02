@@ -329,15 +329,7 @@ export class WorkbenchSettingsService {
 			return this.inMemoryWorkspaceRoot.trim();
 		}
 
-		if (typeof process !== 'undefined' && typeof process.cwd === 'function') {
-			try {
-				return process.cwd();
-			} catch {
-				// Fallback if process.cwd fails
-			}
-		}
-
-		return '';
+		return '/home/ubuntu';
 	}
 
 	/**
@@ -435,6 +427,7 @@ export class WorkbenchSettingsService {
 	 */
 	static subscribe(listener: SettingsListener): () => void {
 		this.listeners.add(listener);
+		listener(this.getAllSettings());
 
 		return () => {
 			this.listeners.delete(listener);
