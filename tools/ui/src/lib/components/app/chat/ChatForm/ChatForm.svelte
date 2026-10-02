@@ -549,6 +549,7 @@
 	class="relative grid {className}"
 	onsubmit={(event) => {
 		event.preventDefault();
+		console.log('[ChatForm] onsubmit:', { value, canSubmit, disabled, hasLoadingAttachments });
 
 		if (!canSubmit || disabled || hasLoadingAttachments) return;
 
