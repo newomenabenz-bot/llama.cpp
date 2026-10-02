@@ -73,11 +73,15 @@ export interface GeminiPart {
 	functionCall?: {
 		name: string;
 		args: Record<string, unknown>;
+		thought_signature?: string;
+		thoughtSignature?: string;
 	};
 	functionResponse?: {
 		name: string;
 		response: Record<string, unknown>;
 	};
+	thought_signature?: string;
+	thoughtSignature?: string;
 }
 
 /**
@@ -156,6 +160,29 @@ export function extractToolCalls(
 		} catch {
 			// ignore parse error
 		}
+	}
+
+	// 5. Check if msg.parts has Gemini functionCall parts
+	if (Array.isArray(anyMsg.parts)) {
+		const result: ApiChatCompletionToolCall[] = [];
+		for (let i = 0; i < anyMsg.parts.length; i++) {
+			const p = anyMsg.parts[i] as GeminiPart;
+			if (p?.functionCall) {
+				const sig =
+					p.thought_signature ??
+					p.thoughtSignature ??
+					p.functionCall.thought_signature ??
+					p.functionCall.thoughtSignature;
+				result.push(
+					fromGeminiFunctionCall(
+						p.functionCall,
+						i,
+						typeof sig === 'string' ? sig : undefined
+					)
+				);
+			}
+		}
+		if (result.length > 0) return result;
 	}
 
 	return [];
@@ -295,12 +322,36 @@ export function formatGeminiContents(
 
 				const name = tc.function?.name || 'unknown_function';
 				pendingToolCallNames.push(name);
-				parts.push({
-					functionCall: {
-						name,
-						args
-					}
-				});
+
+				const sig =
+					(tc as Record<string, unknown>).thought_signature ??
+					(tc as Record<string, unknown>).thoughtSignature ??
+					(tc.function as Record<string, unknown>)?.thought_signature ??
+					(tc.function as Record<string, unknown>)?.thoughtSignature;
+
+				const fnCall: {
+					name: string;
+					args: Record<string, unknown>;
+					thought_signature?: string;
+					thoughtSignature?: string;
+				} = {
+					name,
+					args
+				};
+
+				const part: GeminiPart = {
+					functionCall: fnCall
+				};
+
+				if (sig) {
+					const strSig = String(sig);
+					fnCall.thought_signature = strSig;
+					fnCall.thoughtSignature = strSig;
+					part.thought_signature = strSig;
+					part.thoughtSignature = strSig;
+				}
+
+				parts.push(part);
 			}
 
 			if (parts.length > 0) {
@@ -868,14 +919,16 @@ export class GeminiProvider implements IModelProvider, IWorkbenchProvider {
 												// Function call part
 												const toolCallIndex = accumulatedToolCalls.length;
 												const toolCallId = `call_${part.functionCall.name}_${toolCallIndex}`;
-												const toolCall: ApiChatCompletionToolCall = {
-													id: toolCallId,
-													type: 'function',
-													function: {
-														name: part.functionCall.name,
-														arguments: JSON.stringify(part.functionCall.args || {})
-													}
-												};
+												const sig =
+													(part as Record<string, unknown>).thought_signature ??
+													(part as Record<string, unknown>).thoughtSignature ??
+													(part.functionCall as Record<string, unknown>)?.thought_signature ??
+													(part.functionCall as Record<string, unknown>)?.thoughtSignature;
+												const toolCall: ApiChatCompletionToolCall = fromGeminiFunctionCall(
+													part.functionCall,
+													toolCallId,
+													typeof sig === 'string' ? sig : undefined
+												);
 												accumulatedToolCalls.push(toolCall);
 												options.onToolCallChunk?.(JSON.stringify(accumulatedToolCalls));
 												(options as { onToolCalls?: (calls: ApiChatCompletionToolCall[]) => void }).onToolCalls?.(accumulatedToolCalls);
@@ -908,6 +961,22 @@ export class GeminiProvider implements IModelProvider, IWorkbenchProvider {
 										} else if (typeof part.text === 'string') {
 											accumulatedContent += part.text;
 											options.onChunk?.(part.text);
+										} else if (part.functionCall) {
+											const toolCallIndex = accumulatedToolCalls.length;
+											const toolCallId = `call_${part.functionCall.name}_${toolCallIndex}`;
+											const sig =
+												(part as Record<string, unknown>).thought_signature ??
+												(part as Record<string, unknown>).thoughtSignature ??
+												(part.functionCall as Record<string, unknown>)?.thought_signature ??
+												(part.functionCall as Record<string, unknown>)?.thoughtSignature;
+											const toolCall: ApiChatCompletionToolCall = fromGeminiFunctionCall(
+												part.functionCall,
+												toolCallId,
+												typeof sig === 'string' ? sig : undefined
+											);
+											accumulatedToolCalls.push(toolCall);
+											options.onToolCallChunk?.(JSON.stringify(accumulatedToolCalls));
+											(options as { onToolCalls?: (calls: ApiChatCompletionToolCall[]) => void }).onToolCalls?.(accumulatedToolCalls);
 										}
 									}
 								}
@@ -1015,14 +1084,17 @@ export class GeminiProvider implements IModelProvider, IWorkbenchProvider {
 					} else if (part.functionCall) {
 						const toolCallIndex = toolCalls.length;
 						const toolCallId = `call_${part.functionCall.name}_${toolCallIndex}`;
-						toolCalls.push({
-							id: toolCallId,
-							type: 'function',
-							function: {
-								name: part.functionCall.name,
-								arguments: JSON.stringify(part.functionCall.args || {})
-							}
-						});
+						const sig =
+							(part as Record<string, unknown>).thought_signature ??
+							(part as Record<string, unknown>).thoughtSignature ??
+							(part.functionCall as Record<string, unknown>)?.thought_signature ??
+							(part.functionCall as Record<string, unknown>)?.thoughtSignature;
+						const toolCall = fromGeminiFunctionCall(
+							part.functionCall,
+							toolCallId,
+							typeof sig === 'string' ? sig : undefined
+						);
+						toolCalls.push(toolCall);
 					}
 				}
 			}

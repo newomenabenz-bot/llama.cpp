@@ -314,17 +314,26 @@ export function toGeminiFunctionDeclarations(
  * Translates a Gemini functionCall part into a standard ApiChatCompletionToolCall.
  */
 export function fromGeminiFunctionCall(
-	call: { name: string; args?: Record<string, unknown> },
-	callIndexOrId: number | string = 0
+	call: {
+		name: string;
+		args?: Record<string, unknown>;
+		thought_signature?: string;
+		thoughtSignature?: string;
+	},
+	callIndexOrId: number | string = 0,
+	thoughtSignature?: string
 ): ApiChatCompletionToolCall {
 	const id = typeof callIndexOrId === 'string' ? callIndexOrId : `call_${call.name}_${callIndexOrId}`;
+	const sig = thoughtSignature || call.thought_signature || call.thoughtSignature;
 	return {
 		id,
 		type: 'function',
 		function: {
 			name: call.name,
-			arguments: JSON.stringify(call.args || {})
-		}
+			arguments: JSON.stringify(call.args || {}),
+			...(sig ? { thought_signature: sig, thoughtSignature: sig } : {})
+		},
+		...(sig ? { thought_signature: sig, thoughtSignature: sig } : {})
 	};
 }
 

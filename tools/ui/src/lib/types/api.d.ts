@@ -315,6 +315,8 @@ export interface ApiChatCompletionRequest {
 export interface ApiChatCompletionToolCallFunctionDelta {
 	name?: string;
 	arguments?: string;
+	thought_signature?: string;
+	thoughtSignature?: string;
 }
 
 export interface ApiChatCompletionToolCallDelta {
@@ -322,10 +324,14 @@ export interface ApiChatCompletionToolCallDelta {
 	id?: string;
 	type?: string;
 	function?: ApiChatCompletionToolCallFunctionDelta;
+	thought_signature?: string;
+	thoughtSignature?: string;
 }
 
 export interface ApiChatCompletionToolCall extends ApiChatCompletionToolCallDelta {
 	function?: ApiChatCompletionToolCallFunctionDelta & { arguments?: string };
+	thought_signature?: string;
+	thoughtSignature?: string;
 }
 
 export interface ApiChatCompletionStreamChunk {
