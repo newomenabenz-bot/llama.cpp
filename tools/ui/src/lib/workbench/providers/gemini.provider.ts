@@ -332,8 +332,6 @@ export function formatGeminiContents(
 				const fnCall: {
 					name: string;
 					args: Record<string, unknown>;
-					thought_signature?: string;
-					thoughtSignature?: string;
 				} = {
 					name,
 					args
@@ -345,8 +343,6 @@ export function formatGeminiContents(
 
 				if (sig) {
 					const strSig = String(sig);
-					fnCall.thought_signature = strSig;
-					fnCall.thoughtSignature = strSig;
 					part.thought_signature = strSig;
 					part.thoughtSignature = strSig;
 				}

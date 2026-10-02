@@ -148,11 +148,11 @@ describe('DIR-GEMINI-THOUGHT-SIG-12: Gemini Thought Signature Preservation', () 
 			expect(fnPart.thought_signature).toBe('token_alpha_999');
 			expect(fnPart.thoughtSignature).toBe('token_alpha_999');
 
-			// Verify signature inside functionCall object
+			// Verify functionCall contains only name and args (no unknown fields for Google protobuf)
 			expect(fnPart.functionCall?.name).toBe('get_info');
 			expect(fnPart.functionCall?.args).toEqual({ path: 'src/main.ts' });
-			expect(fnPart.functionCall?.thought_signature).toBe('token_alpha_999');
-			expect(fnPart.functionCall?.thoughtSignature).toBe('token_alpha_999');
+			expect(fnPart.functionCall?.thought_signature).toBeUndefined();
+			expect(fnPart.functionCall?.thoughtSignature).toBeUndefined();
 		});
 
 		it('retains thought_signature from serialized DatabaseMessage toolCalls string', () => {
@@ -196,7 +196,8 @@ describe('DIR-GEMINI-THOUGHT-SIG-12: Gemini Thought Signature Preservation', () 
 			const modelTurn = payload.contents[1];
 
 			expect(modelTurn.parts[0].thought_signature).toBe('db_saved_sig_888');
-			expect(modelTurn.parts[0].functionCall?.thought_signature).toBe('db_saved_sig_888');
+			expect(modelTurn.parts[0].thoughtSignature).toBe('db_saved_sig_888');
+			expect(modelTurn.parts[0].functionCall?.thought_signature).toBeUndefined();
 		});
 	});
 
@@ -298,7 +299,8 @@ describe('DIR-GEMINI-THOUGHT-SIG-12: Gemini Thought Signature Preservation', () 
 
 			const turn1ModelPart = sentPayload.contents[1].parts[0];
 			expect(turn1ModelPart.thought_signature).toBe(expectedSignature);
-			expect(turn1ModelPart.functionCall.thought_signature).toBe(expectedSignature);
+			expect(turn1ModelPart.thoughtSignature).toBe(expectedSignature);
+			expect(turn1ModelPart.functionCall.thought_signature).toBeUndefined();
 		});
 	});
 
@@ -486,8 +488,8 @@ describe('DIR-GEMINI-THOUGHT-SIG-12: Gemini Thought Signature Preservation', () 
 			expect(pos9Part.functionCall?.name).toBe('default_api:file_glob_search');
 			expect(pos9Part.thought_signature).toBe(turn9Signature);
 			expect(pos9Part.thoughtSignature).toBe(turn9Signature);
-			expect(pos9Part.functionCall?.thought_signature).toBe(turn9Signature);
-			expect(pos9Part.functionCall?.thoughtSignature).toBe(turn9Signature);
+			expect(pos9Part.functionCall?.thought_signature).toBeUndefined();
+			expect(pos9Part.functionCall?.thoughtSignature).toBeUndefined();
 
 			// Verify index 10 is user turn with functionResponse
 			expect(payload.contents[10].role).toBe('user');
