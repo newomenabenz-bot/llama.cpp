@@ -1,3 +1,11 @@
+# OMENA llama.cpp downstream
+
+This fork is maintained by **Omenabenz Global Ventures Limited** for the OMENA Autonomous DevOps & Engineering Platform. It adds a browser workbench, Gemini provider integration, agent workflows, persistence, and deployment tooling to [ggml-org/llama.cpp](https://github.com/ggml-org/llama.cpp).
+
+See the [downstream engineering inventory](docs/OMENA.md), [deployment guide](DEPLOYMENT.md), and [security reporting policy](SECURITY.md). The upstream documentation and license remain below. Upstream badges describe upstream builds and releases, not a verified OMENA deployment.
+
+Company: [omenabenzglobalventures.online](https://www.omenabenzglobalventures.online/) | Contact: [ceo@omenabenzglobalventures.online](mailto:ceo@omenabenzglobalventures.online)
+
 # llama.cpp
 
 ![llama](https://raw.githubusercontent.com/ggml-org/llama.brand/refs/heads/master/cover/llama-cpp/cover-llama-cpp-dark.svg)

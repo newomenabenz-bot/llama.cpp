@@ -16,6 +16,7 @@ import {
 	SERVER_STORAGE_PATHS
 } from '$lib/services/server-storage-sync.service';
 import { ToolsService } from '$lib/services/tools.service';
+import { SettingsService } from '$lib/services/settings.service';
 import { WorkbenchSettingsService } from '$lib/workbench/settings/workbench-settings.service';
 import type { DatabaseConversation, DatabaseMessage } from '$lib/types/database';
 
@@ -118,9 +119,18 @@ describe('Server Storage Sync Subsystem', () => {
 	});
 
 	describe('d) Server Settings Pull & Push', () => {
-		it('hydrates WorkbenchSettingsService when pulling settings.json', async () => {
+		it('hydrates settings without importing server credentials', async () => {
+			WorkbenchSettingsService.setGeminiApiKey('local-test-key');
+
+			vi.spyOn(SettingsService, 'loadConfig').mockReturnValue({
+				config: { apiKey: 'local-server-test-key' },
+				isFirstVisit: false,
+				userOverrides: ['apiKey']
+			});
+
+			const saveConfig = vi.spyOn(SettingsService, 'saveConfig');
 			const serverSettingsPayload = {
-				appConfig: { systemPrompt: 'You are a helpful assistant' },
+				appConfig: { apiKey: 'remote-test-key', systemPrompt: 'You are a helpful assistant' },
 				updatedAt: 1727850000000,
 				version: 1,
 				workbench: {
@@ -140,11 +150,17 @@ describe('Server Storage Sync Subsystem', () => {
 			const result = await ServerStorageSyncService.pullSettings();
 			expect(result).toBe(true);
 			expect(WorkbenchSettingsService.getActiveProviderId()).toBe('gemini');
-			expect(WorkbenchSettingsService.getGeminiApiKey()).toBe('AIzaSy-TestKey-999');
+			expect(WorkbenchSettingsService.getGeminiApiKey()).toBe('local-test-key');
+			expect(saveConfig.mock.calls[0][0].apiKey).toBe('local-server-test-key');
 			expect(WorkbenchSettingsService.getExecutionMode()).toBe('AUTONOMOUS');
 		});
 
-		it('pushes settings to server using SERVER_WRITE_FILE tool', async () => {
+		it('pushes settings without exporting credentials', async () => {
+			vi.spyOn(SettingsService, 'loadConfig').mockReturnValue({
+				config: { apiKey: 'local-test-key', systemPrompt: 'Keep this setting' },
+				isFirstVisit: false,
+				userOverrides: ['apiKey', 'systemPrompt']
+			});
 			WorkbenchSettingsService.setActiveProviderId('gemini');
 			WorkbenchSettingsService.setGeminiApiKey('AIzaSy-TestKey-123');
 
@@ -169,7 +185,10 @@ describe('Server Storage Sync Subsystem', () => {
 
 			const writtenContent = JSON.parse((capturedParams as any)?.content as string);
 			expect(writtenContent.workbench.activeProviderId).toBe('gemini');
-			expect(writtenContent.workbench.geminiApiKey).toBe('AIzaSy-TestKey-123');
+			expect(writtenContent.workbench).not.toHaveProperty('geminiApiKey');
+			expect(writtenContent.appConfig).not.toHaveProperty('apiKey');
+			expect(writtenContent.appConfig.systemPrompt).toBe('Keep this setting');
+			expect(writtenContent.userOverrides).toEqual(['systemPrompt']);
 		});
 	});
 });

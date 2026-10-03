@@ -105,6 +105,7 @@ if [ -f "$REPO_ROOT/CMakeLists.txt" ]; then
 	cmake -B "$BUILD_DIR" \
 		-DLLAMA_BUILD_SERVER=ON \
 		-DLLAMA_SERVER_EMBED_UI=ON \
+		-DBUILD_SHARED_LIBS=OFF \
 		-DCMAKE_BUILD_TYPE=Release
 
 	cmake --build "$BUILD_DIR" --config Release --target llama-server -j "$NPROC"
@@ -116,6 +117,7 @@ elif [ -f "$REPO_ROOT/tools/server/CMakeLists.txt" ]; then
 	# Subproject standalone build
 	cmake -B "$BUILD_DIR" -S "$REPO_ROOT/tools/server" \
 		-DLLAMA_SERVER_EMBED_UI=ON \
+		-DBUILD_SHARED_LIBS=OFF \
 		-DCMAKE_BUILD_TYPE=Release
 
 	cmake --build "$BUILD_DIR" --config Release --target llama-server -j "$NPROC"
@@ -140,12 +142,15 @@ echo "  Native llama-server binary successfully built: $SERVER_BINARY"
 echo "[4/6] Assembling standalone distribution package..."
 RELEASE_ROOT="$REPO_ROOT/dist-release/llama-workbench"
 
-# Preserve existing runtime configuration if present (DIR-ROOT-WORKSPACE-17)
-TEMP_ENV_BACKUP=""
-if [ -f "$RELEASE_ROOT/workbench.env" ]; then
-	TEMP_ENV_BACKUP="$(mktemp 2>/dev/null || echo "/tmp/workbench.env.bak.$$")"
-	cp "$RELEASE_ROOT/workbench.env" "$TEMP_ENV_BACKUP"
-fi
+for runtime_config in "$RELEASE_ROOT"/.env* "$RELEASE_ROOT"/*.env "$RELEASE_ROOT"/*.env.*; do
+	case "$runtime_config" in
+		*.env.example|*/.env.example) continue ;;
+	esac
+	if [ -f "$runtime_config" ]; then
+		echo "[ERROR] Runtime configuration exists in $RELEASE_ROOT. Move it to the private deployment directory before rebuilding." >&2
+		exit 1
+	fi
+done
 
 rm -rf "$RELEASE_ROOT"
 mkdir -p "$RELEASE_ROOT/bin"
@@ -177,19 +182,9 @@ echo "  Public Web UI assets verified: $(find "$RELEASE_ROOT/public" -type f | w
 # Copy environment template
 cp "$REPO_ROOT/workbench.env.example" "$RELEASE_ROOT/workbench.env.example"
 
-# Restore preserved workbench.env or initialize from example ensuring /home/ubuntu root
-if [ -n "$TEMP_ENV_BACKUP" ] && [ -f "$TEMP_ENV_BACKUP" ]; then
-	cp "$TEMP_ENV_BACKUP" "$RELEASE_ROOT/workbench.env"
-	rm -f "$TEMP_ENV_BACKUP"
-	echo "  Preserved and restored existing runtime configuration in workbench.env."
-else
-	cp "$REPO_ROOT/workbench.env.example" "$RELEASE_ROOT/workbench.env"
-	echo "  Initialized default workbench.env rooted at /home/ubuntu."
-fi
-
 # Generate distribution README
 cat << 'EOF' > "$RELEASE_ROOT/README.md"
-# Llama Workbench — Standalone Deployment Distribution
+# OMENA Workbench - Standalone Deployment Distribution
 
 This directory contains the self-contained production deployment bundle for **Llama Workbench**,
 embedding the full Web UI and Autonomous Agent IDE directly inside the high-performance native `llama-server`.
@@ -200,7 +195,7 @@ embedding the full Web UI and Autonomous Agent IDE directly inside the high-perf
    ```bash
    ./scripts/workbench.sh start
    ```
-   *Note: If `workbench.env` does not exist, `workbench.sh` automatically creates it from `workbench.env.example` with turnkey remote defaults (`WORKBENCH_HOST=0.0.0.0`, `WORKBENCH_PORT=8080`, `WORKBENCH_CORS_ORIGINS=*`).*
+   *The supervisor creates a private `workbench.env` from the example on first use. Defaults bind to loopback with local CORS. Configure authentication and HTTPS before enabling remote access.*
 
 2. **Verify Status & Logs**:
    ```bash
@@ -214,7 +209,7 @@ embedding the full Web UI and Autonomous Agent IDE directly inside the high-perf
 - `public/`: Compiled Web UI static assets document root (HTML, JS, CSS, PWA).
 - `scripts/workbench.sh`: Runtime process supervisor (start, stop, restart, status, health, logs).
 - `data/models/`: Target folder for local GGUF model weights.
-- `data/workspace/`: Sandboxed filesystem workspace for autonomous agent tool executions.
+- `data/workspace/`: Optional working directory; tools retain the service user's filesystem permissions.
 - `data/logs/`: Production server logs (`workbench.log`).
 
 ## Stopping the Instance
@@ -228,7 +223,7 @@ EOF
 # ------------------------------------------------------------------------------
 echo "[5/6] Performing security and credential hygiene scan on release bundle..."
 
-if grep -r -E "(AIza[0-9A-Za-z-_]{35}|sk-[a-zA-Z0-9]{20,}|sk-ant-[a-zA-Z0-9_-]{20,})" "$RELEASE_ROOT" 2>/dev/null; then
+if grep -r -l -E "(AIza[0-9A-Za-z_-]{35}|gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{40,}|(AKIA|ASIA)[A-Z0-9]{16}|sk-[a-zA-Z0-9_-]{20,}|-----BEGIN ([A-Z]+ )?PRIVATE KEY-----)" "$RELEASE_ROOT" 2>/dev/null; then
 	echo "[ERROR] Hardcoded API credentials detected inside $RELEASE_ROOT!" >&2
 	exit 1
 fi
@@ -237,7 +232,7 @@ if [ -f "$RELEASE_ROOT/workbench.env" ] || [ -f "$RELEASE_ROOT/.env" ]; then
 	echo "[ERROR] Live .env file detected inside $RELEASE_ROOT! Must only include workbench.env.example" >&2
 	exit 1
 fi
-echo "  Hygiene scan clean: 0 credentials or live secrets found."
+echo "  Basic credential-pattern and runtime-file checks passed; run a full secret scan before publishing."
 
 # ------------------------------------------------------------------------------
 # STEP 6: Archive Generation & Binary Verification

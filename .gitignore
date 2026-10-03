@@ -19,8 +19,12 @@ storage/artifacts/*.json
 # Environment & Secrets
 .env
 .env.local
+.env.*
 workbench.env
 *.env
+*.env.*
+!*.env.example
+!.env.example
 *.pem
 *.key
 
@@ -31,4 +35,3 @@ storage/sandbox_test/
 *.pid
 *.log
 data/
-

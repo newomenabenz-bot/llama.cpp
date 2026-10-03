@@ -1,8 +1,8 @@
 /**
  * ==============================================================================
  * Artifact Validation Gate Harness (DIR-DEPLOY-01) - ESM
- * Validates distribution assembly, tarball creation, archive integrity,
- * sandbox extraction, and runtime HTTP lifecycle (/health, /, graceful shutdown).
+ * Tests archive assembly and HTTP lifecycle with a generated mock server.
+ * This does not validate the native llama-server binary or inference.
  * ==============================================================================
  */
 
@@ -24,7 +24,7 @@ const TEST_PORT = 8199;
 const TEST_HOST = '127.0.0.1';
 
 console.log('================================================================================');
-console.log('DIR-DEPLOY-01: ARTIFACT VALIDATION GATE & RUNTIME LIFECYCLE SELF-TEST');
+console.log('OMENA: MOCK ARCHIVE AND HTTP LIFECYCLE SELF-TEST');
 console.log('================================================================================\n');
 
 // ------------------------------------------------------------------------------
@@ -149,7 +149,7 @@ embedding the full Web UI and Autonomous Agent IDE directly inside the high-perf
 - \`scripts/workbench.sh\`: Runtime process supervisor (start, stop, restart, status, health, logs).
 - \`workbench.env.example\`: Environment configuration template.
 - \`data/models/\`: Target directory for local GGUF model weights.
-- \`data/workspace/\`: Sandboxed filesystem workspace for autonomous agent tool executions.
+- \`data/workspace/\`: Working directory; this mock test does not establish tool isolation.
 - \`data/logs/\`: Production server logs (\`workbench.log\`).
 
 ## Stopping the Instance
@@ -478,7 +478,8 @@ async function runLifecycleTests() {
     console.log(`     ✓ Port ${TEST_PORT} released cleanly.`);
 
     console.log('\n================================================================================');
-    console.log('[SUCCESS] ALL ARTIFACT VALIDATION GATES PASSED (100%)');
+    console.log('[SUCCESS] MOCK ARCHIVE AND HTTP LIFECYCLE CHECKS PASSED');
+    console.log('- Native C++ server, inference, authentication, and tool execution were not tested');
     console.log(`- Release Package: ${RELEASE_PKG}`);
     console.log(`- Release Archive: ${ARCHIVE_PATH} (${(archiveStats.size / 1024).toFixed(2)} KB)`);
     console.log(`- Sandbox Extraction: ${EXTRACTED_DIR}`);

@@ -217,7 +217,7 @@
 					modelsStore.selectedModelName ||
 					WorkbenchSettingsService.getSelectedGeminiModel() ||
 					WorkbenchSettingsService.getGeminiModel()
-			  )
+				)
 			: !isRouter || !!conversationModel || !!modelsStore.selectedModelId
 	);
 	let hasLoadingAttachments = $derived(uploadedFiles.some((f) => f.isLoading));
@@ -549,7 +549,6 @@
 	class="relative grid {className}"
 	onsubmit={(event) => {
 		event.preventDefault();
-		console.log('[ChatForm] onsubmit:', { value, canSubmit, disabled, hasLoadingAttachments });
 
 		if (!canSubmit || disabled || hasLoadingAttachments) return;
 

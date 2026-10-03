@@ -1,6 +1,10 @@
-# Llama Workbench — Production Deployment & Operations Manual
+# OMENA Workbench - Deployment and Operations
 **Directive Reference**: `DIR-DEPLOY-01 (Amended)`  
 **Release Target**: Llama Workbench (Embedded llama-server + Web UI + Autonomous Agent IDE)
+
+This guide describes the existing Omenabenz downstream deployment. It does not verify a running production server. See [the engineering inventory and migration checklist](docs/OMENA.md) for implementation evidence and limitations.
+
+The workbench exposes administrative file and shell tools. Keep the server on loopback behind authenticated HTTPS, use a restricted service account, and configure trusted browser origins. Frontend SAFE mode and a working directory are not server-side security isolation.
 
 ---
 
@@ -17,7 +21,7 @@
 |---|---|---|
 | **C++ Compiler** | `g++` or `clang++` (C++17 support) | *Not Required* |
 | **CMake** | `>= 3.14` | *Not Required* |
-| **Node.js & npm** | Node.js `>= 18.x`, npm | *Not Required* |
+| **Node.js & npm** | Node.js 24 LTS and npm (matching the current UI workflow) | *Not Required* |
 | **POSIX Shell & Utilities** | `bash`, `tar`, `curl` | `bash`, `tar`, `curl` |
 
 To install build prerequisites on a fresh Debian/Ubuntu host:
@@ -35,6 +39,7 @@ Use this workflow on a build server, CI runner, or development VPS:
 ```bash
 # 1. Clone repository
 git clone https://github.com/newomenabenz-bot/llama.cpp.git
+# After a verified organization transfer, use https://github.com/omenabenzglobal/llama.cpp.git
 cd llama.cpp
 
 # 2. Execute the automated packaging pipeline
@@ -45,6 +50,7 @@ cd dist-release/llama-workbench
 
 # 4. Configure environment
 cp workbench.env.example workbench.env
+chmod 600 workbench.env
 
 # 5. Start the supervisor daemon
 ./scripts/workbench.sh start
@@ -66,6 +72,7 @@ cd llama-workbench
 
 # 2. Configure production settings
 cp workbench.env.example workbench.env
+chmod 600 workbench.env
 # Edit workbench.env if non-standard port or local model path is needed:
 # nano workbench.env
 
@@ -86,6 +93,7 @@ All operational parameters are configured via `workbench.env` (loaded automatica
 # Network & Server Configuration
 WORKBENCH_HOST=127.0.0.1
 WORKBENCH_PORT=8080
+WORKBENCH_CORS_ORIGINS=localhost
 
 # Local Model Configuration (Optional: Leave blank if using cloud Gemini or remote APIs)
 WORKBENCH_MODEL_PATH=
@@ -95,18 +103,24 @@ WORKBENCH_CTX_SIZE=4096
 WORKBENCH_N_THREADS=4
 WORKBENCH_N_GPU_LAYERS=0
 
-# Runtime Working Directory & Paths
+# Runtime Working Directory & Paths (existing production default)
 WORKBENCH_DATA_DIR=./data
-WORKBENCH_WORKSPACE_DIR=./data/workspace
+WORKBENCH_WORKSPACE_DIR=/home/ubuntu
 WORKBENCH_LOG_FILE=./data/logs/workbench.log
 WORKBENCH_PID_FILE=./data/workbench.pid
 
-# Server API Protection (Optional: sets Bearer token for incoming requests to llama-server)
+# Server API Protection (required for non-loopback binding)
 WORKBENCH_API_KEY=
 ```
 
 > [!IMPORTANT]
 > `workbench.env` is strictly git-ignored to prevent accidental credential commits. Never commit live `.env` files into source control.
+
+New defaults use loopback and local CORS. Existing runtime files are preserved by the supervisor, so update older `WORKBENCH_HOST=0.0.0.0` or wildcard CORS settings before a restart. For remote access, use an exact trusted HTTPS origin and configure server bearer authentication or an authenticated reverse proxy. CORS is not authentication.
+
+Keep live environment files in the private runtime directory, outside `dist-release/`. Packaging ships only `workbench.env.example` and refuses to overwrite a release directory containing `workbench.env`. The supervisor creates private files with restrictive permissions and passes the configured server key through `LLAMA_API_KEY`, not command-line arguments.
+
+Browser provider keys are entered in Provider Settings. Example `GEMINI_API_KEY`, `GITHUB_TOKEN`, and `WORKBENCH_PASSWORD` variables are not a new server provider or password-login configuration. Never put keys in Vite public variables. Each browser must configure its own provider key after credentials are excluded from server settings sync.
 
 ---
 
@@ -220,6 +234,7 @@ server {
 cd /opt/llama.cpp
 git fetch origin master
 git checkout master
+git merge --ff-only origin/master
 
 # 3. Rebuild and package new distribution
 ./scripts/package-workbench.sh
@@ -227,6 +242,7 @@ git checkout master
 # 4. Copy newly built binary and assets into runtime path
 cp build-release/bin/llama-server /opt/llama-workbench/bin/llama-server
 cp scripts/workbench.sh /opt/llama-workbench/scripts/workbench.sh
+cp -a dist-release/llama-workbench/public/. /opt/llama-workbench/public/
 
 # 5. Restart instance
 /opt/llama-workbench/scripts/workbench.sh start
@@ -240,8 +256,22 @@ The following directories survive updates and restarts:
 
 - **Host-Side Storage (`data/`)**:
   - `data/models/`: Retains downloaded `.gguf` weights.
-  - `data/workspace/`: Retains files created, modified, or restored by autonomous tools.
+  - `data/workspace/`: Optional working directory. The configured default is `/home/ubuntu`; neither path is an operating-system sandbox.
   - `data/logs/`: Retains server execution logs (`workbench.log`).
 - **Client-Side Storage (Browser)**:
   - **Dexie IndexedDB (`version(1)`)**: Retains conversation history, session checkpoints, and message trees.
   - **LocalStorage (`LlamaUi.workbench.*`)**: Retains execution modes (`SAFE`, `ASSISTED`, `AUTONOMOUS`), API provider keys (Gemini, OpenAI, Anthropic, DeepSeek), token budgets, and terminal history.
+
+The implemented server sync writes conversations and non-private settings beneath `/home/ubuntu/.llama-workbench/data/`. Gemini keys and registry-marked private settings are excluded from new sync payloads. Review older `settings.json` files and backups privately; the cleanup does not erase previously stored credentials. Rotate credentials if those files were exposed.
+
+## Migration and validation
+
+Before transferring ownership, follow the [migration checklist](docs/OMENA.md#migration-to-omenabenzglobal). After GitHub confirms the transfer, update the clone's origin:
+
+```bash
+git remote set-url origin https://github.com/omenabenzglobal/llama.cpp.git
+```
+
+Do not restart production solely for the ownership change. Back up private runtime configuration and data, then deploy the reviewed changes through the existing controlled maintenance procedure.
+
+`scripts/sandbox-validate.js` creates a mock HTTP server for archive smoke checks. Passing it does not verify native inference, authentication, tool isolation, cloud deployment, or production health. Native binary and deployment validation require a compatible build/runtime host and a configured model or router.

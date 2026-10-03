@@ -5,6 +5,7 @@
 # ==============================================================================
 
 set -euo pipefail
+umask 077
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -41,9 +42,9 @@ elif [ -f "$EXAMPLE_ENV" ]; then
 fi
 
 # 2. Configuration Defaults
-WORKBENCH_HOST="${WORKBENCH_HOST:-0.0.0.0}"
+WORKBENCH_HOST="${WORKBENCH_HOST:-127.0.0.1}"
 WORKBENCH_PORT="${WORKBENCH_PORT:-8080}"
-WORKBENCH_CORS_ORIGINS="${WORKBENCH_CORS_ORIGINS:-*}"
+WORKBENCH_CORS_ORIGINS="${WORKBENCH_CORS_ORIGINS:-localhost}"
 WORKBENCH_MODEL_PATH="${WORKBENCH_MODEL_PATH:-}"
 WORKBENCH_CTX_SIZE="${WORKBENCH_CTX_SIZE:-4096}"
 WORKBENCH_N_THREADS="${WORKBENCH_N_THREADS:-4}"
@@ -95,6 +96,25 @@ is_running() {
 }
 
 do_start() {
+	case "$WORKBENCH_HOST" in
+		127.0.0.1|localhost|::1) ;;
+		*)
+			if [ -z "$WORKBENCH_API_KEY" ] && [ -z "${LLAMA_API_KEY:-}" ] && [ -z "${LLAMA_ARG_API_KEY_FILE:-}" ]; then
+				echo "[ERROR] Non-loopback binding requires a server API key. Use a local bind behind an authenticated HTTPS proxy or configure WORKBENCH_API_KEY." >&2
+				exit 1
+			fi
+			;;
+	esac
+	if [[ "$WORKBENCH_CORS_ORIGINS" == *"*"* ]]; then
+		echo "[ERROR] Wildcard CORS is unsafe with workbench tools. Configure localhost or explicit trusted origins." >&2
+		exit 1
+	fi
+	case "$WORKBENCH_API_KEY" in
+		change_me|your_key_here|your_token_here)
+			echo "[ERROR] Replace the example API key before starting the server." >&2
+			exit 1
+			;;
+	esac
 	ensure_directories
 
 	if is_running; then
@@ -118,7 +138,7 @@ do_start() {
 	local args=(
 		--host "$WORKBENCH_HOST"
 		--port "$WORKBENCH_PORT"
-		--cors-origins "${WORKBENCH_CORS_ORIGINS:-*}"
+		--cors-origins "$WORKBENCH_CORS_ORIGINS"
 		--ctx-size "$WORKBENCH_CTX_SIZE"
 		--threads "$WORKBENCH_N_THREADS"
 	)
@@ -136,7 +156,7 @@ do_start() {
 	fi
 
 	if [ -n "$WORKBENCH_API_KEY" ]; then
-		args+=(--api-key "$WORKBENCH_API_KEY")
+		export LLAMA_API_KEY="$WORKBENCH_API_KEY"
 	fi
 
 	# Native Tool Engine & Jinja Tool Calling Support (DEF-QA-001)
@@ -149,8 +169,8 @@ do_start() {
 	if [ -d "$run_workspace" ]; then
 		cd "$run_workspace"
 	else
-		mkdir -p "$run_workspace" 2>/dev/null || true
-		cd "$run_workspace" 2>/dev/null || cd /home/ubuntu 2>/dev/null || true
+		mkdir -p "$run_workspace"
+		cd "$run_workspace"
 	fi
 	echo "[INFO] Workbench process working directory rooted at: $(pwd)"
 

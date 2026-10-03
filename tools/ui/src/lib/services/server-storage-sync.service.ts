@@ -8,6 +8,7 @@
  */
 
 import { browser } from '$app/environment';
+import { SETTINGS_REGISTRY } from '$lib/constants';
 import { BuiltInTool } from '$lib/enums';
 import type {
 	DatabaseConversation,
@@ -52,6 +53,12 @@ export class ServerStorageSyncService {
 	private static hasPulledConversations = false;
 	private static isPullingConversations = false;
 	private static isPushingConversations = false;
+	private static privateSettingsKeys = new Set(
+		SETTINGS_REGISTRY.flatMap((section) =>
+			section.settings.filter((setting) => setting.isPrivate).map((setting) => setting.key)
+		)
+	);
+
 	private static pushConversationsTimer: ReturnType<typeof setTimeout> | null = null;
 
 	private static hasPulledSettings = false;
@@ -63,7 +70,10 @@ export class ServerStorageSyncService {
 	private static isApplyingServerSettings = false;
 
 	private static isClientRuntime(): boolean {
-		if (typeof process !== 'undefined' && (process.env?.VITEST || process.env?.NODE_ENV === 'test')) {
+		if (
+			typeof process !== 'undefined' &&
+			(process.env?.VITEST || process.env?.NODE_ENV === 'test')
+		) {
 			return true;
 		}
 		return Boolean(browser || typeof window !== 'undefined');
@@ -239,9 +249,6 @@ export class ServerStorageSyncService {
 						if (wb.activeProviderId) {
 							WorkbenchSettingsService.setActiveProviderId(wb.activeProviderId);
 						}
-						if (wb.geminiApiKey && wb.geminiApiKey.trim()) {
-							WorkbenchSettingsService.setGeminiApiKey(wb.geminiApiKey.trim());
-						}
 						if (wb.geminiModel) {
 							WorkbenchSettingsService.setGeminiModel(wb.geminiModel);
 						}
@@ -257,14 +264,18 @@ export class ServerStorageSyncService {
 					}
 
 					if (payload.appConfig && typeof payload.appConfig === 'object') {
+						const appConfig = this.withoutPrivateSettings(payload.appConfig);
 						const current = SettingsService.loadConfig();
-						const mergedConfig = { ...current.config, ...payload.appConfig };
+						const mergedConfig = { ...current.config, ...appConfig };
 						const mergedOverrides = Array.from(
-							new Set([...current.userOverrides, ...(payload.userOverrides || [])])
+							new Set([
+								...current.userOverrides,
+								...(payload.userOverrides || []).filter((key) => !this.privateSettingsKeys.has(key))
+							])
 						);
 						SettingsService.saveConfig(mergedConfig, mergedOverrides);
 						if (settingsStore && settingsStore.config) {
-							for (const [key, value] of Object.entries(payload.appConfig)) {
+							for (const [key, value] of Object.entries(appConfig)) {
 								(settingsStore.config as Record<string, unknown>)[key] = value;
 							}
 						}
@@ -298,14 +309,13 @@ export class ServerStorageSyncService {
 		try {
 			const { config, userOverrides } = SettingsService.loadConfig();
 			const payload: ServerSettingsPayload = {
-				appConfig: config,
+				appConfig: this.withoutPrivateSettings(config),
 				updatedAt: Date.now(),
-				userOverrides,
+				userOverrides: userOverrides.filter((key) => !this.privateSettingsKeys.has(key)),
 				version: 1,
 				workbench: {
 					activeProviderId: WorkbenchSettingsService.getActiveProviderId(),
 					executionMode: WorkbenchSettingsService.getExecutionMode(),
-					geminiApiKey: WorkbenchSettingsService.getGeminiApiKey(),
 					geminiModel: WorkbenchSettingsService.getGeminiModel(),
 					geminiSelectedModel: WorkbenchSettingsService.getSelectedGeminiModel(),
 					workspaceRoot: WorkbenchSettingsService.getWorkspaceRoot()
@@ -343,5 +353,11 @@ export class ServerStorageSyncService {
 			this.pushSettingsTimer = null;
 			void this.pushSettings();
 		}, delayMs);
+	}
+
+	private static withoutPrivateSettings(config: Record<string, unknown>): Record<string, unknown> {
+		return Object.fromEntries(
+			Object.entries(config).filter(([key]) => !this.privateSettingsKeys.has(key))
+		);
 	}
 }

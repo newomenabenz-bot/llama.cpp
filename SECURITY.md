@@ -1,3 +1,19 @@
+# OMENA downstream security policy
+
+Report vulnerabilities affecting this Omenabenz fork or its workbench privately to [ceo@omenabenzglobalventures.online](mailto:ceo@omenabenzglobalventures.online). Include the affected commit, component, impact, and safe reproduction steps. Do not post credentials, private logs, or exploit details in public issues or pull requests.
+
+Rotate any credential that may have been exposed. Removing it from the current files does not remove it from Git history, caches, logs, or distributed archives. Do not rewrite shared history until affected credentials are revoked or rotated and the owner has agreed on a recovery plan.
+
+Keep runtime environment files and provider keys outside Git and release archives. Browser provider keys remain accessible to scripts on that origin; use a trusted browser and dedicated origin. Existing server settings snapshots may contain credentials from older versions and must be reviewed privately after upgrading.
+
+The workbench is an administrative tool, not a multi-tenant security boundary. Native tools can read, write, or run commands with the service user's permissions. A workspace working directory and frontend SAFE mode do not replace operating-system isolation or server authentication. Use a restricted service account, local binding, authenticated HTTPS access, and trusted origins.
+
+No bug bounty, support deadline, or fixed security-update schedule is promised. Consult the maintainers about support for a specific downstream commit. Upstream-only defects should be assessed against the [current upstream policy](https://github.com/ggml-org/llama.cpp/blob/master/SECURITY.md).
+
+## Inherited upstream security reference
+
+The policy below is retained for upstream context. Its reporting channels and program statements describe upstream; Omenabenz reports use the private company contact above.
+
 # Security Policy
 
  - [**Reporting a vulnerability**](#reporting-a-vulnerability)
